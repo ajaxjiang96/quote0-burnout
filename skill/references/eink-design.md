@@ -2,7 +2,7 @@
 
 296×152 B&W e-ink dashboards for Quote/0 devices.
 
-## Layout (v0.6)
+## Layout (v0.8)
 
 ```
                         16:40
@@ -10,23 +10,30 @@
 5h  [████████████░░░░░] 89%  4h41m
 Week [████████░░░░░░░░] 69%  5d23h
 ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─
-◆ DEEPSEEK
-$18.42                        OK
+◆ CLAUDE
+5h  [████████████░░░░░] 42%  2h13m
+Week [████████░░░░░░░░] 61%  3d4h
 ```
 
-- **Codex**: dual-row, inline dot-grid bar. Bar = remaining%, text = remaining% + reset.
-- **DeepSeek**: VCR 21px balance + 16px status badge, bottom-aligned.
+- **Codex / Claude**: matched dual-row panels. Each panel is header 18px + two 18px rows.
+- **Bars**: inline dot-grid bar. Bar = remaining%, text = remaining% + reset.
+- **Shared alignment**: compute one `note_x` from all visible notes; all four bars use the same width.
 - **Divider**: 6px dash / 4px gap.
 
-## Codex Row
+## Panel Geometry
 
 ```python
-ROW_H = 22
-BAR_H = 14
+PANEL_Y = 12
+PANEL_HEADER_H = 18
+PANEL_ROW_H = 18
+PANEL_H = PANEL_HEADER_H + PANEL_ROW_H * 2
+DIVIDER_GAP_TOP = 8
+DIVIDER_GAP_BOTTOM = 10
+BAR_H = 10
 LABEL_W = 36
 
-def _draw_codex_row(draw, y, label, used_pct, reset, note_font, label_font, note_x=None):
-    bar_y = y + (ROW_H - BAR_H) // 2
+def _draw_usage_row(draw, y, label, used_pct, reset, note_font, label_font, note_x):
+    bar_y = y + (PANEL_ROW_H - BAR_H) // 2
     # Label left, right text (remaining% + reset), bar middle
     draw.text((PAD, …), label, font=label_font)
     note = f"{100-used_pct:.0f}%  {reset}"
@@ -34,7 +41,7 @@ def _draw_codex_row(draw, y, label, used_pct, reset, note_font, label_font, note
     _bar_dots(draw, PAD+LABEL_W, bar_y, note_x-4-(PAD+LABEL_W), BAR_H, 100-used_pct)
 ```
 
-Pre-compute `note_x` from max note width across both rows for equal bar widths.
+Pre-compute `note_x` from max note width across all Codex + Claude rows for equal bar widths.
 
 ## Bar Style (dot-grid)
 
@@ -54,15 +61,17 @@ def _bar_dots(draw, x, y, w, h, used_pct):
 
 | Font | Size | File | Use |
 |------|------|------|-----|
-| VCR OSD Mono | 21px | VCR_OSD_MONO_1.001.ttf | DeepSeek balance |
-| PixelOperator | 16px | PixelOperator.ttf | All other text |
-| Minecraftia | 8px | Minecraftia-Regular.ttf | Timestamp only |
+| PixelOperator | 16px | PixelOperator.ttf | Section labels and row labels |
+| Minecraftia | 8px | Minecraftia-Regular.ttf | Timestamp and usage notes |
 
 All in `assets/fonts/`.
 
 ## Logos
 
-16×16 pixel art in `assets/logos/`. Pasted pixel-by-pixel (PIL `paste()` doesn't work for pure B&W blending).
+16×16 1-bit PNGs in `assets/logos/`. Pasted pixel-by-pixel (PIL `paste()` doesn't work for pure B&W blending).
+
+- `codex.png`: Codex mark
+- `claude.png`: Claude symbol, converted to monochrome for e-ink
 
 ```python
 LOGO_W = 16
@@ -89,7 +98,7 @@ def _time_until(val) -> str:
     return f"{m}m"
 ```
 
-## Bottom Whitespace
+## Bottom Fit
 
-Target 15-20px below the last content element. Use `textbbox()` to trace exact positions.
-Current layout: DeepSeek balance bottom ≈ y=133, display height = 152 → 19px remaining.
+Both panels use `PANEL_H=54`; top panel starts at y=12 and bottom panel ends around y=138, leaving safe bottom whitespace within 152px.
+Use `textbbox()` to trace exact positions and avoid clipping.

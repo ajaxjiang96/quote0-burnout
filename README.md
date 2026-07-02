@@ -1,6 +1,6 @@
 # quote0-burnout
 
-MindReset Quote/0 墨水屏 AI 用量仪表盘 — OpenAI Codex + DeepSeek。
+MindReset Quote/0 墨水屏 AI 用量仪表盘 — OpenAI Codex + Claude。
 
 [English](README_EN.md)
 
@@ -15,14 +15,16 @@ MindReset Quote/0 墨水屏 AI 用量仪表盘 — OpenAI Codex + DeepSeek。
 5h  [████████████░░░░░] 89%  4h41m
 Week [████████░░░░░░░░] 69%  5d23h
 ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─
-◆ DEEPSEEK
-$18.42                        OK
+◆ CLAUDE
+5h  [████████████░░░░░] 42%  2h13m
+Week [████████░░░░░░░░] 61%  3d4h
 ```
 
-- **Codex**：双行布局（5h / Week），内联点阵进度条，显示余量百分比 + 重置倒计时
-- **DeepSeek**：余额 21px 大字 + 状态标，底部对齐
-- **字体**：PixelOperator 16px / VCR OSD Mono 21px / Minecraftia 8px
+- **Codex / Claude**：同尺寸双行面板（5h / Week），内联点阵进度条，显示余量百分比 + 重置倒计时
+- **图标**：Codex 和 Claude 都使用 16×16 单色 PNG；Claude 来自 Claude symbol 的墨水屏二值化版本
+- **字体**：PixelOperator 16px / Minecraftia 8px
 - Codex 数据直连 OpenAI OAuth API，**无需 CLI 依赖**
+- Claude 数据参考 CodexBar 的 Claude Code OAuth usage API；若本机没有 OAuth credentials，会 fallback 到 `claude /usage`
 
 > 完整的设计规范、API 参考、渲染细节见 [`skill/`](skill/) 目录。
 
@@ -45,8 +47,8 @@ cp config.example.env .env
 |------|------|------|
 | `QUOTE0_API_KEY` | ✓ | Quote/0 API key |
 | `QUOTE0_DEVICE_ID` | ✓ | 设备 ID |
-| `DEEPSEEK_API_KEY` | | DeepSeek API key |
 | `CODEX_ACCESS_TOKEN` | | 覆盖 Codex token（默认读 ~/.codex/auth.json） |
+| `CLAUDE_ACCESS_TOKEN` | | 覆盖 Claude token（默认读 ~/.claude/.credentials.json；缺失时 fallback 到 `claude /usage`） |
 
 ## 使用
 
@@ -72,6 +74,7 @@ python display.py --check     # 检查所有环节
 ```
 
 - **Codex 显示 "no auth"** — 运行 `codex` 重新认证
+- **Claude 显示 "no auth"** — 运行 `claude` 重新认证，或设置 `CLAUDE_ACCESS_TOKEN`
 - **推送 404** — Dot. App 里删掉 IMAGE_API 卡片重新添加
 - **定时不更新** — `launchctl kickstart gui/$(id -u)/com.ajax.quote0-burnout`
 
