@@ -82,6 +82,7 @@ CLAUDE_USAGE_URL = "https://api.anthropic.com/api/oauth/usage"
 CLAUDE_BETA_HEADER = "oauth-2025-04-20"
 CLAUDE_USER_AGENT = _env("CLAUDE_USER_AGENT", "claude-code/2.1.0")
 CLAUDE_CLI = _env("CLAUDE_CLI", "claude")
+CLAUDE_KEYCHAIN_SERVICE = "Claude Code-credentials"
 
 
 def _load_codex_token():
@@ -132,25 +133,98 @@ def get_codex_usage():
         return {"ok": False, "status": "error", "detail": str(e)[:200]}
 
 
+def _extract_claude_access_token(payload: str) -> str:
+    """Extract Claude Code OAuth access token from a credentials JSON payload."""
+    auth = json.loads(payload)
+    oauth = auth.get("claudeAiOauth", {})
+    token = oauth.get("accessToken") or oauth.get("access_token") or ""
+    if isinstance(token, str):
+        return token.strip()
+    return ""
+
+
+def _claude_keychain_services() -> list[str]:
+    """Return likely Claude Code Keychain service names, with the canonical name first."""
+    services = [CLAUDE_KEYCHAIN_SERVICE]
+    try:
+        result = subprocess.run(
+            ["/usr/bin/security", "dump-keychain"],
+            capture_output=True,
+            text=True,
+            timeout=8,
+            check=False,
+        )
+    except Exception:
+        return services
+
+    if result.returncode != 0:
+        return services
+
+    for service in re.findall(r'"svce"<blob>="(Claude Code-credentials[^"]*)"', result.stdout):
+        if service not in services:
+            services.append(service)
+    return services
+
+
+def _load_claude_token_from_keychain() -> str:
+    """Return Claude Code OAuth access token from macOS Keychain."""
+    accounts = []
+    for account in (os.environ.get("USER", ""), os.environ.get("LOGNAME", ""), Path.home().name):
+        account = account.strip()
+        if account and account not in accounts:
+            accounts.append(account)
+    accounts.append("")
+
+    for service in _claude_keychain_services():
+        for account in accounts:
+            cmd = ["/usr/bin/security", "find-generic-password", "-s", service]
+            if account:
+                cmd.extend(["-a", account])
+            cmd.append("-w")
+
+            try:
+                result = subprocess.run(cmd, capture_output=True, text=True, timeout=4, check=False)
+            except Exception:
+                continue
+            if result.returncode != 0 or not result.stdout.strip():
+                continue
+
+            try:
+                token = _extract_claude_access_token(result.stdout)
+            except (json.JSONDecodeError, TypeError):
+                continue
+            if token:
+                return token
+
+    raise FileNotFoundError("No Claude OAuth token found in macOS Keychain.")
+
+
 def _load_claude_token() -> str:
-    """Return Claude Code OAuth access token from env or ~/.claude/.credentials.json."""
+    """Return Claude Code OAuth access token from env, credentials file, or Keychain."""
     if CLAUDE_ACCESS_TOKEN.strip():
         return CLAUDE_ACCESS_TOKEN.strip()
 
-    if not CLAUDE_AUTH_PATH.exists():
+    file_error: Exception | None = None
+    if CLAUDE_AUTH_PATH.exists():
+        try:
+            with open(CLAUDE_AUTH_PATH) as f:
+                token = _extract_claude_access_token(f.read())
+        except (json.JSONDecodeError, TypeError) as e:
+            file_error = e
+        else:
+            if token:
+                return token
+            file_error = ValueError("Claude credentials file exists but has no claudeAiOauth.accessToken.")
+
+    try:
+        return _load_claude_token_from_keychain()
+    except FileNotFoundError as e:
+        if file_error:
+            raise file_error
         raise FileNotFoundError(
-            f"No Claude credentials at {CLAUDE_AUTH_PATH}. "
+            f"No Claude credentials at {CLAUDE_AUTH_PATH} or macOS Keychain. "
             "Run `claude` to authenticate first, or set CLAUDE_ACCESS_TOKEN in .env."
-        )
-
-    with open(CLAUDE_AUTH_PATH) as f:
-        auth = json.load(f)
-
-    oauth = auth.get("claudeAiOauth", {})
-    token = oauth.get("accessToken", "")
-    if not token:
-        raise ValueError("Claude credentials file exists but has no claudeAiOauth.accessToken.")
-    return token
+        ) from e
 
 
 def _parse_claude_cli_reset(value: str, now: datetime | None = None) -> str | None:

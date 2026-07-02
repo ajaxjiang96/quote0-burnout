@@ -11,6 +11,13 @@ from render import render_image
 
 
 class ClaudeUsageSnapshotTests(unittest.TestCase):
+    def test_extracts_claude_access_token_from_keychain_payload(self):
+        token = display._extract_claude_access_token(
+            '{"claudeAiOauth":{"accessToken":"sk-ant-oat-test","refreshToken":"hidden"}}'
+        )
+
+        self.assertEqual(token, "sk-ant-oat-test")
+
     def test_parses_claude_cli_usage_output(self):
         raw = display.parse_claude_cli_usage(
             "\n".join([

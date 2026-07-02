@@ -24,7 +24,7 @@ Week [████████░░░░░░░░] 61%  3d4h
 - **Icons**: Codex and Claude both use 16×16 monochrome PNGs; Claude is an e-ink binary version of the Claude symbol.
 - **Fonts**: PixelOperator 16px / Minecraftia 8px.
 - Codex data via direct OAuth API — **no CLI dependency**.
-- Claude data follows CodexBar's Claude Code OAuth usage API, falling back to `claude /usage` when local OAuth credentials are unavailable.
+- Claude data follows CodexBar's Claude Code OAuth usage API. Tokens are read from env, `~/.claude/.credentials.json`, or macOS Keychain, with `claude /usage` as a fallback.
 
 > Full design spec, API reference, and rendering details in [`skill/`](skill/).
 
@@ -46,7 +46,7 @@ cp config.example.env .env
 | `QUOTE0_API_KEY` | ✓ | Quote/0 API key |
 | `QUOTE0_DEVICE_ID` | ✓ | Device ID |
 | `CODEX_ACCESS_TOKEN` | | Override Codex token (default: ~/.codex/auth.json) |
-| `CLAUDE_ACCESS_TOKEN` | | Override Claude token (default: ~/.claude/.credentials.json; fallback: `claude /usage`) |
+| `CLAUDE_ACCESS_TOKEN` | | Override Claude token (default: ~/.claude/.credentials.json or macOS Keychain; fallback: `claude /usage`) |
 
 ## Usage
 
@@ -73,7 +73,7 @@ python display.py --check
 ```
 
 - **Codex "no auth"** — run `codex` to re-authenticate
-- **Claude "no auth"** — run `claude` to re-authenticate, or set `CLAUDE_ACCESS_TOKEN`
+- **Claude "no auth"** — run `claude` to re-authenticate, confirm macOS Keychain access, or set `CLAUDE_ACCESS_TOKEN`
 - **Push 404** — delete and re-add the IMAGE_API card in Dot. App Content Studio
 - **Schedule not updating** — `launchctl kickstart gui/$(id -u)/com.ajax.quote0-burnout`
 
