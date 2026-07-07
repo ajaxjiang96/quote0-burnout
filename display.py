@@ -21,6 +21,7 @@ import json
 import os
 import subprocess
 import sys
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -42,6 +43,7 @@ QUOTE0_REFRESH_NOW = _env("QUOTE0_REFRESH_NOW", "false").lower() == "true"
 QUOTE0_IMAGE_TASK_KEY = _env("QUOTE0_IMAGE_TASK_KEY")
 QUOTE0_TEXT_TASK_KEY  = _env("QUOTE0_TEXT_TASK_KEY")
 QUOTE0_PREVIEW_PATH   = _env("QUOTE0_PREVIEW_PATH", "/tmp/quote0_burnout_preview.png")
+SNAPSHOT_CACHE_PATH   = _HERE / "tmp" / "last_snapshot.json"
 
 API_BASE = "https://dot.mindreset.tech"
 
@@ -107,35 +109,63 @@ def _load_codex_token():
     return tokens.get("access_token", ""), tokens.get("account_id", "")
 
 
-def get_codex_usage():
-    """Fetch OpenAI Codex usage via direct API (no codexbar dependency)."""
-    try:
-        access_token, account_id = _load_codex_token()
-        headers = {
-            "Authorization": f"Bearer {access_token}",
-            "Accept": "application/json",
-            "User-Agent": "quote0-burnout",
-        }
-        if account_id:
-            headers["ChatGPT-Account-Id"] = account_id
+_RETRYABLE_STATUSES = {"timeout", "error"}
+_RETRYABLE_HTTP_CODES = {429, 500, 502, 503, 504}
 
-        r = requests.get(CODEX_USAGE_URL, headers=headers, timeout=15)
-        r.raise_for_status()
-        return {"ok": True, "raw": r.json()}
 
-    except FileNotFoundError as e:
-        return {"ok": False, "status": "no auth", "detail": str(e)}
-    except requests.Timeout:
-        return {"ok": False, "status": "timeout"}
-    except requests.HTTPError as e:
-        detail = ""
+def _is_retryable(result: dict) -> bool:
+    status = result.get("status", "")
+    if status in _RETRYABLE_STATUSES:
+        return True
+    if status and status.startswith("HTTP "):
         try:
-            detail = e.response.text[:200]
-        except Exception:
+            code = int(status.split(" ", 1)[1])
+            return code in _RETRYABLE_HTTP_CODES
+        except (ValueError, IndexError):
             pass
-        return {"ok": False, "status": f"HTTP {e.response.status_code}", "detail": detail}
-    except Exception as e:
-        return {"ok": False, "status": "error", "detail": str(e)[:200]}
+    return False
+
+
+def get_codex_usage(retries: int = 2, delay: float = 2.0):
+    """Fetch OpenAI Codex usage with retry on transient failures."""
+    for attempt in range(1 + retries):
+        try:
+            access_token, account_id = _load_codex_token()
+            headers = {
+                "Authorization": f"Bearer {access_token}",
+                "Accept": "application/json",
+                "User-Agent": "quote0-burnout",
+            }
+            if account_id:
+                headers["ChatGPT-Account-Id"] = account_id
+
+            r = requests.get(CODEX_USAGE_URL, headers=headers, timeout=15)
+            r.raise_for_status()
+            return {"ok": True, "raw": r.json()}
+
+        except FileNotFoundError as e:
+            return {"ok": False, "status": "no auth", "detail": str(e)}
+        except requests.Timeout:
+            result = {"ok": False, "status": "timeout"}
+        except requests.HTTPError as e:
+            code = e.response.status_code
+            detail = ""
+            try:
+                detail = e.response.text[:200]
+            except Exception:
+                pass
+            result = {"ok": False, "status": f"HTTP {code}", "detail": detail}
+            if code not in _RETRYABLE_HTTP_CODES:
+                return result
+        except Exception as e:
+            result = {"ok": False, "status": "error", "detail": str(e)[:200]}
+
+        if attempt < retries and _is_retryable(result):
+            time.sleep(delay)
+            continue
+        return result
+
+    return result
 
 
 def get_deepseek_balance():
@@ -263,14 +293,34 @@ def build_deepseek_snapshot(ds: dict) -> dict:
 
 
 def build_snapshot() -> dict:
-    """Fetch and build full snapshot."""
-    codex = get_codex_usage()
-    deepseek = get_deepseek_balance()
-    return {
-        "codex": build_codex_snapshot(codex),
-        "deepseek": build_deepseek_snapshot(deepseek),
-        "updated_at": datetime.now().strftime("%H:%M"),
-    }
+    """Fetch and build full snapshot, falling back to cache on failure."""
+    codex_raw = get_codex_usage()
+    ds_raw = get_deepseek_balance()
+    codex = build_codex_snapshot(codex_raw)
+    deepseek = build_deepseek_snapshot(ds_raw)
+    now = datetime.now().strftime("%H:%M")
+
+    if codex.get("ok"):
+        snap = {"codex": codex, "deepseek": deepseek, "updated_at": now, "_cached": False}
+        SNAPSHOT_CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            SNAPSHOT_CACHE_PATH.write_text(json.dumps(snap, indent=2), encoding="utf-8")
+        except Exception:
+            pass
+        return snap
+
+    try:
+        cached = json.loads(SNAPSHOT_CACHE_PATH.read_text(encoding="utf-8"))
+        if cached.get("codex", {}).get("ok"):
+            cached["updated_at"] = now + " (cached)"
+            cached["_cached"] = True
+            if deepseek.get("ok"):
+                cached["deepseek"] = deepseek
+            return cached
+    except Exception:
+        pass
+
+    return {"codex": codex, "deepseek": deepseek, "updated_at": now, "_cached": False}
 
 
 # ── Legacy normalize (v0.2–v0.3 compat) ───────────────────────────────────────

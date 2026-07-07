@@ -63,144 +63,104 @@ def _tsize(draw: ImageDraw.ImageDraw, text: str, font: ImageFont.FreeTypeFont):
     return bbox[2] - bbox[0], bbox[3] - bbox[1]
 
 
-# ── v0.6 E-Ink Dashboard (zellux-style) ──────────────────────────────────
-# Dual-row Codex: label + inline bar(dots) + remaining% + reset time
+_op14_font = None
 
-def _bar_dots(draw, x, y, w, h, used_pct):
-    """Zellux-style bar: outline + filled portion + dot grid in empty area."""
-    used_pct = max(0, min(100, used_pct or 0))
-    draw.rectangle([x, y, x + w - 1, y + h - 1], outline=BLACK)
-    filled = int((w - 2) * used_pct / 100)
-    if filled > 0:
-        draw.rectangle([x + 1, y + 1, x + filled, y + h - 2], fill=BLACK)
-    # Dot grid in empty area (4px spacing)
-    dot_spacing = 4
-    empty_x0 = x + 1 + filled
-    margin = dot_spacing // 2
-    for dy in range(y + 1 + margin, y + h - 1 - margin + 1, dot_spacing):
-        for dx in range(x + 1 + margin, x + w - 1 - margin + 1, dot_spacing):
-            if dx >= empty_x0:
-                draw.point((dx, dy), fill=BLACK)
-
-
-ROW_H = 22
-BAR_H = 14
-LABEL_W = 36
-
-
-def _draw_codex_row(draw, y, label_text, used_pct, reset_str, note_font, row_label_font, note_x=None):
-    """Draw one Codex row: label + bar(dots) + remaining% + reset."""
-    bar_y = y + (ROW_H - BAR_H) // 2
-
-    # Label (e.g. "5h", "Week")
-    lh = row_label_font.size
-    draw.text((PAD, bar_y + (BAR_H - lh) // 2), label_text, font=row_label_font, fill=BLACK)
-
-    # Right text: remaining% + reset
-    remaining = 100 - used_pct if used_pct is not None else 0
-    note = f"{remaining:.0f}%  {reset_str}" if reset_str and reset_str != "?" else f"{remaining:.0f}%"
-    nw, nh = _tsize(draw, note, note_font)
-    if note_x is None:
-        note_x = W - PAD - nw
-    draw.text((note_x, bar_y + (BAR_H - nh) // 2), note, font=note_font, fill=BLACK)
-
-    # Bar (filled = REMAINING)
-    bar_x = PAD + LABEL_W
-    bar_w = note_x - 4 - bar_x
-    if used_pct is not None:
-        _bar_dots(draw, bar_x, bar_y, bar_w, BAR_H, 100 - used_pct)
-    return y + ROW_H
+def _op14() -> ImageFont.FreeTypeFont:
+    global _op14_font
+    if _op14_font is None:
+        _op14_font = ImageFont.truetype(str(OP_FONT), 14)
+    return _op14_font
 
 
 def _render_v5(img: Image.Image, draw: ImageDraw.ImageDraw, snap: dict):
     cx = snap.get("codex", {})
     ds = snap.get("deepseek", {})
-    ts  = snap.get("updated_at", datetime.now().strftime("%H:%M"))
+    ts = snap.get("updated_at", datetime.now().strftime("%H:%M"))
 
-    label = _op()       # 16px PixelOperator — section labels, row text
-    bal   = _vcr()      # 21px VCR OSD Mono — deepseek balance
-    small = _pixel()    # 8px Minecraftia — timestamp
+    big = _vcr()          # 21px VCR — CODEX, labels, percentages
+    mid = _op()           # 16px OP — general text
+    small = _op14()       # 14px OP — countdown text
+    time_font = ImageFont.truetype(str(OP_FONT), 18)  # 18px OP — timestamp
 
-    def _logo(logo_img, y):
-        """Paste a 12×12 logo at (PAD, y), blending B&W onto the image."""
-        for dy in range(LOGO_W):
-            for dx in range(LOGO_W):
+    LOGO_S = 20
+    logo_big = LOGO_CODEX.resize((LOGO_S, LOGO_S), Image.NEAREST)
+
+    def _logo_draw(logo_img, x, y):
+        for dy in range(LOGO_S):
+            for dx in range(LOGO_S):
                 if logo_img.getpixel((dx, dy)) == 0:
-                    img.putpixel((PAD + dx, y + dy), BLACK)
+                    img.putpixel((x + dx, y + dy), BLACK)
 
-    # ── Timestamp ──────────────────────────────────────────────────────
-    tsw, _ = _tsize(draw, ts, small)
-    draw.text((W - PAD - tsw, 14), ts, font=small, fill=BLACK)
+    def _divider(cy):
+        x, gap = 0, 4
+        while x < W:
+            draw.line([(x, cy), (min(x + 5, W), cy)], fill=BLACK)
+            x += 5 + gap
 
-    # ── CODEX ──────────────────────────────────────────────────────────
-    y = 14
+    def _bar(dx, dy, dw, dh, pct):
+        pct = max(0, min(100, pct or 0))
+        draw.rectangle([dx, dy, dx + dw - 1, dy + dh - 1], outline=BLACK)
+        fill = int((dw - 2) * pct / 100)
+        if fill > 0:
+            draw.rectangle([dx + 1, dy + 1, dx + fill, dy + dh - 2], fill=BLACK)
+        sp = 2
+        sx = dx + 1 + fill
+        for ry in range(dy + 1 + sp, dy + dh - 1 - sp + 1, 4):
+            for rx in range(dx + 1 + sp, dx + dw - 1 - sp + 1, 4):
+                if rx >= sx:
+                    draw.point((rx, ry), fill=BLACK)
 
+    # ── Header ──────────────────────────────────────────────────────────
+    _logo_draw(logo_big, PAD, 12)
+    draw.text((PAD + LOGO_S + 6, 14), "CODEX", font=big, fill=BLACK)
+    tsw, _ = _tsize(draw, ts, time_font)
+    draw.text((W - PAD - tsw, 14), ts, font=time_font, fill=BLACK)
+    if snap.get("_cached"):
+        cw, _ = _tsize(draw, "cache", small)
+        draw.text((W - PAD - cw, 36), "cache", font=small, fill=BLACK)
+
+    # ── Divider ─────────────────────────────────────────────────────────
+    _divider(44)
+
+    # ── Codex rows ──────────────────────────────────────────────────────
     if cx.get("ok"):
-        short_label = cx.get("short_label", "?")
-        short_used  = cx.get("short_used_percent")
-        short_reset = cx.get("short_reset", "?")
-        long_label  = cx.get("long_label", "?")
-        long_used   = cx.get("long_used_percent")
-        long_reset  = cx.get("long_reset", "?")
+        rows = [
+            (cx.get("short_label", "?"), cx.get("short_used_percent"), cx.get("short_reset", "?")),
+            (cx.get("long_label", "?"), cx.get("long_used_percent"), cx.get("long_reset", "?")),
+        ]
+        bx, bw = 64, 160
+        rh = 28
+        ry = 56
+        rx = bx + bw + 8
 
-        # Logo + section label
-        _logo(LOGO_CODEX, y)
-        draw.text((LABEL_X, y), "CODEX", font=label, fill=BLACK)
-        y += 20
-
-        # Pre-compute max note width so both bars are equal width
-        def _note(used, reset):
-            r = 100 - used if used is not None else 0
-            return f"{r:.0f}%  {reset}" if reset and reset != "?" else f"{r:.0f}%"
-        n1 = _note(short_used, short_reset)
-        n2 = _note(long_used, long_reset)
-        nw1, _ = _tsize(draw, n1, label)
-        nw2, _ = _tsize(draw, n2, label)
-        note_x = W - PAD - max(nw1, nw2)
-
-        # Row 1: 5h + bar(dots) + remaining% + reset
-        y = _draw_codex_row(draw, y, short_label, short_used, short_reset, label, label, note_x)
-
-        # Row 2: Week + bar(dots) + remaining% + reset
-        y = _draw_codex_row(draw, y, long_label, long_used, long_reset, label, label, note_x)
+        for label, used, reset in rows:
+            draw.text((PAD, ry + 6), label, font=big, fill=BLACK)
+            _bar(bx, ry, bw, rh, 100 - used if used is not None else 0)
+            remaining = 100 - used if used is not None else 0
+            draw.text((rx, ry - 2), f"{remaining:.0f}%", font=big, fill=BLACK)
+            rw2, _ = _tsize(draw, reset, small)
+            draw.text((rx, ry + rh - 6), reset, font=small, fill=BLACK)
+            ry += rh + 16
     else:
-        _logo(LOGO_CODEX, y)
-        draw.text((LABEL_X, y), "CODEX", font=label, fill=BLACK)
+        draw.text((PAD, 56), "CODEX", font=big, fill=BLACK)
         status = cx.get("raw_status", "error")
-        y += 18
-        draw.text((LABEL_X, y), status, font=label, fill=BLACK)
-        _, eh = _tsize(draw, status, label)
-        y += eh + 6
+        draw.text((PAD, 80), status, font=mid, fill=BLACK)
 
-    # ── Divider (zellux-style: 6px dash / 4px gap) ─────────────────────
-    y += 10
-    dash_len, gap_len = 6, 4
-    x = 0
-    while x < W:
-        draw.line([(x, y), (min(x + dash_len - 1, W), y)], fill=BLACK, width=1)
-        x += dash_len + gap_len
-    y += 12
-
-    # ── DEEPSEEK ────────────────────────────────────────────────────────
-    _logo(LOGO_DEEPSEEK, y)
-    draw.text((LABEL_X, y), "DEEPSEEK", font=label, fill=BLACK)
-    y += 18
-
+    # ── DeepSeek ─────────────────────────────────────────────────────────
     if ds.get("ok"):
+        _divider(ry + 4)
+        ry += 16
+        dlogo = LOGO_DEEPSEEK.resize((LOGO_S, LOGO_S), Image.NEAREST)
+        _logo_draw(dlogo, PAD, ry)
+        draw.text((PAD + LOGO_S + 6, ry + 2), "DEEPSEEK", font=mid, fill=BLACK)
+        ry += 24
         bal_val = ds.get("balance")
         sym = ds.get("symbol", "$")
-        bal_text = f"{sym}{bal_val:.2f}" if bal_val is not None else "?"
-
-        draw.text((LABEL_X, y), bal_text, font=bal, fill=BLACK)
-        _, bh = _tsize(draw, bal_text, bal)
-
-        # Status badge — aligned to balance baseline
+        draw.text((PAD, ry), f"{sym}{bal_val:.2f}" if bal_val is not None else "?", font=big, fill=BLACK)
+        _, bh = _tsize(draw, "0", big)
         status = ds.get("status", "ok").upper()
-        sw, sh = _tsize(draw, status, label)
-        draw.text((W - PAD - sw, y + bh - sh), status, font=label, fill=BLACK)
-    else:
-        status = ds.get("raw_status", "error")
-        draw.text((LABEL_X, y), status, font=label, fill=BLACK)
+        sw, _ = _tsize(draw, status, small)
+        draw.text((W - PAD - sw, ry + bh - 6), status, font=small, fill=BLACK)
 
 
 # ── Legacy ────────────────────────────────────────────────────────────────
