@@ -79,10 +79,10 @@ def _render_v5(img: Image.Image, draw: ImageDraw.ImageDraw, snap: dict):
 
     big = _vcr()          # 21px VCR — CODEX, labels, percentages
     mid = _op()           # 16px OP — general text
-    small = _op14()       # 14px OP — countdown text
-    time_font = ImageFont.truetype(str(OP_FONT), 18)  # 18px OP — timestamp
+    countdown_font = ImageFont.truetype(str(VCR_FONT), 20)  # 20px VCR — countdown (bold, clear)
+    time_font = ImageFont.truetype(str(VCR_FONT), 20)  # 20px VCR — timestamp (bold, clear)
 
-    LOGO_S = 20
+    LOGO_S = 16
     logo_big = LOGO_CODEX.resize((LOGO_S, LOGO_S), Image.NEAREST)
 
     def _logo_draw(logo_img, x, y):
@@ -97,7 +97,7 @@ def _render_v5(img: Image.Image, draw: ImageDraw.ImageDraw, snap: dict):
             draw.line([(x, cy), (min(x + 5, W), cy)], fill=BLACK)
             x += 5 + gap
 
-    def _bar(dx, dy, dw, dh, pct):
+    def _bar(dx, dy, dw, dh, pct, label=""):
         pct = max(0, min(100, pct or 0))
         draw.rectangle([dx, dy, dx + dw - 1, dy + dh - 1], outline=BLACK)
         fill = int((dw - 2) * pct / 100)
@@ -109,18 +109,26 @@ def _render_v5(img: Image.Image, draw: ImageDraw.ImageDraw, snap: dict):
             for rx in range(dx + 1 + sp, dx + dw - 1 - sp + 1, 4):
                 if rx >= sx:
                     draw.point((rx, ry), fill=BLACK)
+        fs = 20
+        fnt = ImageFont.truetype(str(VCR_FONT), fs)
+        tw, _ = draw.textbbox((0, 0), label, font=fnt)[2:]
+        if tw < fill:
+            tx = dx + (fill - tw) // 2
+            draw.text((tx, dy + (dh - fs) // 2 - 1), label, font=fnt, fill=WHITE)
+        else:
+            tx = dx + dw + 4
+            draw.text((tx, dy + (dh - fs) // 2 - 1), label, font=fnt, fill=BLACK)
 
     # ── Header ──────────────────────────────────────────────────────────
-    _logo_draw(logo_big, PAD, 12)
-    draw.text((PAD + LOGO_S + 6, 14), "CODEX", font=big, fill=BLACK)
+    # Center header vertically in top zone
+    header_zone = 28
+    _logo_draw(logo_big, PAD, (header_zone - LOGO_S) // 2)
+    draw.text((PAD + LOGO_S + 4, (header_zone - 21) // 2), "CODEX", font=big, fill=BLACK)
     tsw, _ = _tsize(draw, ts, time_font)
-    draw.text((W - PAD - tsw, 14), ts, font=time_font, fill=BLACK)
-    if snap.get("_cached"):
-        cw, _ = _tsize(draw, "cache", small)
-        draw.text((W - PAD - cw, 36), "cache", font=small, fill=BLACK)
+    draw.text((W - PAD - tsw, (header_zone - 18) // 2), ts, font=time_font, fill=BLACK)
 
     # ── Divider ─────────────────────────────────────────────────────────
-    _divider(44)
+    _divider(header_zone)
 
     # ── Codex rows ──────────────────────────────────────────────────────
     if cx.get("ok"):
@@ -129,18 +137,26 @@ def _render_v5(img: Image.Image, draw: ImageDraw.ImageDraw, snap: dict):
             (cx.get("long_label", "?"), cx.get("long_used_percent"), cx.get("long_reset", "?")),
         ]
         bx, bw = 64, 160
-        rh = 28
-        ry = 56
+        rh = 32
+        # Center two bars vertically in content zone
+        content_top = header_zone + 1
+        content_h = H - content_top
+        total_bars_h = rh * 2 + 12
+        bar_start_y = content_top + (content_h - total_bars_h) // 2
+        ry = bar_start_y
         rx = bx + bw + 8
 
         for label, used, reset in rows:
-            draw.text((PAD, ry + 6), label, font=big, fill=BLACK)
-            _bar(bx, ry, bw, rh, 100 - used if used is not None else 0)
+            # Use baseline alignment for consistent visual centering
+            ascent, descent = big.getmetrics()
+            baseline_y = ry + (rh + ascent - descent) // 2
+            draw.text((PAD, baseline_y - ascent), label, font=big, fill=BLACK)
             remaining = 100 - used if used is not None else 0
-            draw.text((rx, ry - 2), f"{remaining:.0f}%", font=big, fill=BLACK)
-            rw2, _ = _tsize(draw, reset, small)
-            draw.text((rx, ry + rh - 6), reset, font=small, fill=BLACK)
-            ry += rh + 16
+            _bar(bx, ry, bw, rh, remaining, f"{remaining:.0f}%")
+            # Center countdown vertically with bar
+            _, cd_h = _tsize(draw, reset, countdown_font)
+            draw.text((rx, ry + (rh - cd_h) // 2), reset, font=countdown_font, fill=BLACK)
+            ry += rh + 12
     else:
         draw.text((PAD, 56), "CODEX", font=big, fill=BLACK)
         status = cx.get("raw_status", "error")
