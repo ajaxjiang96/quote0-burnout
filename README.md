@@ -9,20 +9,20 @@ MindReset Quote/0 墨水屏 AI 用量仪表盘 — OpenAI Codex + DeepSeek。
 
 ## 效果
 
+Canvas API 模式（v0.7 新增）：
 ```
-                        16:40
-◆ CODEX
-5h  [████████████░░░░░] 89%  4h41m
-Week [████████░░░░░░░░] 69%  5d23h
-─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─
-◆ DEEPSEEK
+                        08:51
+[#] CODEX
+5h   [████████████░░░░░] 66%  4h12m
+Week [████████████░░░░░] 63%  6d4h
+──────────────────────────────────
+[#] DEEPSEEK
 $18.42                        OK
 ```
 
-- **Codex**：双行布局（5h / Week），内联点阵进度条，显示余量百分比 + 重置倒计时
-- **DeepSeek**：余额 21px 大字 + 状态标，底部对齐
-- **字体**：PixelOperator 16px / VCR OSD Mono 21px / Minecraftia 8px
-- Codex 数据直连 OpenAI OAuth API，**无需 CLI 依赖**
+与 Image API 的区别：
+- **Image API（默认）**：本地用 PIL 渲染 296×152 PNG → base64 上传
+- **Canvas API（`--canvas`）**：发送 windowData JSON → 服务器端渲染
 
 > 完整的设计规范、API 参考、渲染细节见 [`skill/`](skill/) 目录。
 
@@ -45,15 +45,21 @@ cp config.example.env .env
 |------|------|------|
 | `QUOTE0_API_KEY` | ✓ | Quote/0 API key |
 | `QUOTE0_DEVICE_ID` | ✓ | 设备 ID |
+| `QUOTE0_CANVAS_TASK_KEY` | | Canvas API task key（Canvas 模式） |
+| `QUOTE0_IMAGE_TASK_KEY` | | Image API task key（Image 模式） |
+| `QUOTE0_TEXT_TASK_KEY` | | Text API task key（Text 模式） |
 | `DEEPSEEK_API_KEY` | | DeepSeek API key |
 | `CODEX_ACCESS_TOKEN` | | 覆盖 Codex token（默认读 ~/.codex/auth.json） |
 
 ## 使用
 
 ```bash
-python display.py --preview   # 本地预览
-python display.py             # 推送到设备
-python display.py --check     # 自检
+python display.py                      # Image API（默认，本地渲染 PNG）
+python display.py --canvas             # Canvas API（服务器端渲染）
+python display.py --canvas --preview   # 保存 Canvas JSON 预览
+python display.py --preview            # 保存 PNG 预览
+python display.py --text               # Text API（纯文本卡片）
+python display.py --check              # 自检
 ```
 
 ## 定时任务
@@ -72,7 +78,8 @@ python display.py --check     # 检查所有环节
 ```
 
 - **Codex 显示 "no auth"** — 运行 `codex` 重新认证
-- **推送 404** — Dot. App 里删掉 IMAGE_API 卡片重新添加
+- **推送 404** — Dot. App 里删掉对应 API 卡片重新添加
+- **Canvas 模式推送失败** — 确保 Dot. App Content Studio 里添加了 Canvas API content 到设备 loop task，且 `QUOTE0_CANVAS_TASK_KEY` 已配置
 - **定时不更新** — `launchctl kickstart gui/$(id -u)/com.ajax.quote0-burnout`
 
 ## 技能文件

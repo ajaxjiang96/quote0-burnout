@@ -1,14 +1,21 @@
 #!/usr/bin/env python3
 """
-quote0-burnout v0.5 — fetch usage, build snapshot, render dashboard, push to Quote/0.
+quote0-burnout v0.7 — fetch usage, build snapshot, push to Quote/0.
+
+Modes:
+  Image API (default): render PNG locally → push via Image API
+  Canvas API (--canvas): build windowData JSON → push via Canvas API (server-rendered)
+  Text API  (--text):   plain text card
 
 Usage:
-  python display.py                   # Image API (default)
-  python display.py --preview         # Save preview PNG, skip push
-  python display.py --text            # Text API fallback (v0.1 compat)
-  python display.py --check           # Self-check, no push
-  python display.py --debug-json      # Print snapshot JSON, no push
-  python display.py --list-tasks      # List fixed + loop task slots
+  python display.py                     # Image API (default)
+  python display.py --canvas            # Canvas API (server-rendered dashboard)
+  python display.py --canvas --preview  # Save Canvas JSON preview, skip push
+  python display.py --preview           # Save PNG preview, skip push
+  python display.py --text              # Text API fallback (v0.1 compat)
+  python display.py --check             # Self-check, no push
+  python display.py --debug-json        # Print snapshot JSON, no push
+  python display.py --list-tasks        # List fixed + loop task slots
   python display.py --list-tasks fixed
   python display.py --list-tasks loop
 """
@@ -39,9 +46,10 @@ QUOTE0_DEVICE_ID   = _env("QUOTE0_DEVICE_ID")
 DEEPSEEK_API_KEY   = _env("DEEPSEEK_API_KEY")
 QUOTE0_REFRESH_NOW = _env("QUOTE0_REFRESH_NOW", "false").lower() == "true"
 
-QUOTE0_IMAGE_TASK_KEY = _env("QUOTE0_IMAGE_TASK_KEY")
-QUOTE0_TEXT_TASK_KEY  = _env("QUOTE0_TEXT_TASK_KEY")
-QUOTE0_PREVIEW_PATH   = _env("QUOTE0_PREVIEW_PATH", "/tmp/quote0_burnout_preview.png")
+QUOTE0_IMAGE_TASK_KEY  = _env("QUOTE0_IMAGE_TASK_KEY")
+QUOTE0_TEXT_TASK_KEY   = _env("QUOTE0_TEXT_TASK_KEY")
+QUOTE0_CANVAS_TASK_KEY = _env("QUOTE0_CANVAS_TASK_KEY")
+QUOTE0_PREVIEW_PATH    = _env("QUOTE0_PREVIEW_PATH", "/tmp/quote0_burnout_preview.png")
 
 API_BASE = "https://dot.mindreset.tech"
 
@@ -276,7 +284,8 @@ def build_snapshot() -> dict:
 # ── Legacy normalize (v0.2–v0.3 compat) ───────────────────────────────────────
 
 def _time_until(val) -> str:
-    """Human-readable countdown from ISO string or unix timestamp (int/float)."""
+    """Human-readable countdown from ISO string or unix timestamp (int/float).
+    Hours are always zero-padded: 6d04h, 2h45m."""
     if val is None:
         return "?"
     try:
@@ -295,9 +304,9 @@ def _time_until(val) -> str:
     if h >= 24:
         d = h // 24
         h = h % 24
-        return f"{d}d{h}h" if h > 0 else f"{d}d"
+        return f"{d}d{h:02d}h" if h > 0 else f"{d}d"
     if h > 0:
-        return f"{h}h{m:02d}m" if m > 0 else f"{h}h"
+        return f"{h}h{m:02d}m"
     return f"{m}m"
 
 
@@ -426,12 +435,341 @@ def push_text(payload: dict) -> dict:
     return {"ok": True, "body": r.json()}
 
 
+# ── Canvas API (v0.7) ──────────────────────────────────────────────────────────
+
+# Base64 logo — Codex only (Canvas API has a 1-img limit per screen)
+CODEX_LOGO_DATA_URI = (
+    "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQAQAAAAA3iMLMAAAAO0lEQVR4nAEwAM//"
+    "Af8ABPmHAvsIAecMAugIAtAAAhwAAv4CAgAAANsdAd+6AN/zBPAIAhLoAP4fAf8AeAkP3QHlRD8AAAAASUVORK5CYII="
+)
+
+# Font classes (Dot. chillduansans — cleaner than pixel fonts on e-ink)
+FONT_SMALL  = "text-10-chillduansans"   # timestamp
+FONT_LABEL  = "text-14-chillduansans"   # section labels, bar text
+FONT_BOLD   = "text-14-chillduansans font-bold"  # section headers
+FONT_BALANCE = "text-22-chillduansans"  # deepseek balance
+
+BAR_H = 14  # bar height in px
+
+
+def _bar_element(remaining_pct: float) -> dict:
+    """Build a Canvas bar: bordered outline + two flex children (filled/empty)."""
+    if remaining_pct is None:
+        remaining_pct = 0
+    remaining_pct = max(0, min(100, remaining_pct))
+    return {
+        "type": "div",
+        "props": {
+            "tw": "flex flex-row flex-1",
+            "style": {
+                "height": f"{BAR_H}px",
+                "border": "1px solid black",
+            },
+            "children": [
+                {
+                    "type": "div",
+                    "props": {
+                        "tw": "bg-black",
+                        "style": {
+                            "width": f"{remaining_pct:.0f}%",
+                            "height": "100%",
+                        },
+                    },
+                },
+                {
+                    "type": "div",
+                    "props": {
+                        "style": {
+                            "width": f"{100 - remaining_pct:.0f}%",
+                            "height": "100%",
+                        },
+                    },
+                },
+            ],
+        },
+    }
+
+
+def build_canvas_payload(snapshot: dict) -> dict:
+    """Build Canvas API request payload from a snapshot dict.
+
+    Translates the PIL-rendered dashboard (render.py _render_v5) into
+    Canvas API windowData: div/span/img elements with Dot. Tailwind styling.
+
+    NOTE: Canvas API has a 1-img limit per screen. Only the Codex logo
+    uses an img element; DEEPSEEK section uses text-only header.
+    """
+    cx = snapshot.get("codex", {})
+    ds = snapshot.get("deepseek", {})
+    ts = snapshot.get("updated_at", datetime.now().strftime("%H:%M"))
+
+    children = []
+
+    # ── CODEX header: logo + "CODEX" (left) ... timestamp (right) ─────
+    children.append({
+        "type": "div",
+        "props": {
+            "tw": "flex flex-row items-center justify-between",
+            "children": [
+                {
+                    "type": "div",
+                    "props": {
+                        "tw": "flex flex-row items-center gap-[4px]",
+                        "children": [
+                            {
+                                "type": "img",
+                                "props": {
+                                    "src": CODEX_LOGO_DATA_URI,
+                                    "style": {"width": "16px", "height": "16px"},
+                                },
+                            },
+                            {
+                                "type": "span",
+                                "props": {
+                                    "tw": FONT_BOLD,
+                                    "children": "CODEX",
+                                },
+                            },
+                        ],
+                    },
+                },
+                {
+                    "type": "span",
+                    "props": {
+                        "tw": f"{FONT_SMALL} min-w-[38px]",
+                        "style": {"textAlign": "right"},
+                        "children": ts,
+                    },
+                },
+            ],
+        },
+    })
+
+    if cx.get("ok"):
+        short_label = cx.get("short_label", "5h")
+        short_used = cx.get("short_used_percent") or 0
+        short_reset = cx.get("short_reset", "?")
+        long_label = cx.get("long_label", "Week")
+        long_used = cx.get("long_used_percent") or 0
+        long_reset = cx.get("long_reset", "?")
+
+        def _fmt_note(used, reset):
+            r = 100 - int(used) if used else 0
+            return f"{r:.0f}%  {reset}" if reset and reset != "?" else f"{r:.0f}%"
+
+        # Row 1: label + bar + note
+        children.append({
+            "type": "div",
+            "props": {
+                "tw": "flex flex-row items-center gap-[4px]",
+                "children": [
+                    {
+                        "type": "span",
+                        "props": {
+                            "tw": f"{FONT_LABEL} shrink-0 w-[40px]",
+                            "children": short_label,
+                        },
+                    },
+                    _bar_element(100 - short_used),
+                    {
+                        "type": "span",
+                        "props": {
+                            "tw": f"{FONT_LABEL} shrink-0 min-w-[80px]",
+                            "style": {"textAlign": "right", "whiteSpace": "nowrap"},
+                            "children": _fmt_note(short_used, short_reset),
+                        },
+                    },
+                ],
+            },
+        })
+
+        # Row 2: label + bar + note
+        children.append({
+            "type": "div",
+            "props": {
+                "tw": "flex flex-row items-center gap-[4px]",
+                "children": [
+                    {
+                        "type": "span",
+                        "props": {
+                            "tw": f"{FONT_LABEL} shrink-0 w-[40px]",
+                            "children": long_label,
+                        },
+                    },
+                    _bar_element(100 - long_used),
+                    {
+                        "type": "span",
+                        "props": {
+                            "tw": f"{FONT_LABEL} shrink-0 min-w-[80px]",
+                            "style": {"textAlign": "right", "whiteSpace": "nowrap"},
+                            "children": _fmt_note(long_used, long_reset),
+                        },
+                    },
+                ],
+            },
+        })
+    else:
+        status = cx.get("raw_status", "error")
+        children.append({
+            "type": "div",
+            "props": {
+                "tw": "flex flex-row",
+                "children": {
+                    "type": "span",
+                    "props": {
+                        "tw": FONT_LABEL,
+                        "children": status,
+                    },
+                },
+            },
+        })
+
+    # ── Divider ────────────────────────────────────────────────────────
+    children.append({
+        "type": "div",
+        "props": {
+            "style": {
+                "height": "1px",
+                "backgroundColor": "black",
+            },
+        },
+    })
+
+    # ── DEEPSEEK section (text-only — 1-img Canvas limit) ──────────────
+    children.append({
+        "type": "div",
+        "props": {
+            "tw": "flex flex-row",
+            "children": {
+                "type": "span",
+                "props": {
+                    "tw": FONT_BOLD,
+                    "children": "DEEPSEEK",
+                },
+            },
+        },
+    })
+
+    if ds.get("ok"):
+        bal = ds.get("balance")
+        sym = ds.get("symbol", "$")
+        bal_text = f"{sym}{bal:.2f}" if bal is not None else "?"
+        status = ds.get("status", "ok").upper()
+
+        children.append({
+            "type": "div",
+            "props": {
+                "tw": "flex flex-row items-end justify-between",
+                "children": [
+                    {
+                        "type": "span",
+                        "props": {
+                            "tw": FONT_BALANCE,
+                            "children": bal_text,
+                        },
+                    },
+                    {
+                        "type": "span",
+                        "props": {
+                            "tw": FONT_LABEL,
+                            "children": status,
+                        },
+                    },
+                ],
+            },
+        })
+    else:
+        status = ds.get("raw_status", "error")
+        children.append({
+            "type": "div",
+            "props": {
+                "tw": "flex flex-row",
+                "children": {
+                    "type": "span",
+                    "props": {
+                        "tw": FONT_LABEL,
+                        "children": status,
+                    },
+                },
+            },
+        })
+
+    # ── Assemble ────────────────────────────────────────────────────────
+    window_data = {
+        "default": [
+            {
+                "type": "div",
+                "props": {
+                    "tw": "flex flex-col w-full h-full bg-white text-black gap-[2px] p-[12px]",
+                    "children": children,
+                },
+            }
+        ]
+    }
+
+    payload: dict = {
+        "refreshNow": QUOTE0_REFRESH_NOW,
+        "windowData": window_data,
+        "border": 0,
+    }
+
+    if QUOTE0_CANVAS_TASK_KEY:
+        payload["taskKey"] = QUOTE0_CANVAS_TASK_KEY
+
+    return payload
+
+
+def push_canvas(payload: dict) -> dict:
+    """Push canvas payload to Quote/0 device via Canvas API."""
+    url = f"{API_BASE}/api/authV2/open/device/{QUOTE0_DEVICE_ID}/canvas"
+    r = requests.post(
+        url,
+        json=payload,
+        headers={
+            "Authorization": f"Bearer {QUOTE0_API_KEY}",
+            "Content-Type": "application/json",
+        },
+        timeout=20,
+    )
+    if not r.ok:
+        try:
+            body = r.json()
+        except Exception:
+            body = {"_raw": r.text}
+        return {"ok": False, "status": r.status_code, "body": body}
+    return {"ok": True, "body": r.json()}
+
+
 # ── Run (push) ────────────────────────────────────────────────────────────────
 
-def run(preview: bool = False, text_mode: bool = False):
+def run(preview: bool = False, text_mode: bool = False, canvas_mode: bool = False):
     snapshot = build_snapshot()
 
-    if text_mode:
+    if canvas_mode:
+        payload = build_canvas_payload(snapshot)
+
+        if preview is True:
+            preview_path = Path(QUOTE0_PREVIEW_PATH).with_suffix(".canvas.json")
+            preview_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2))
+            print(f"Canvas payload saved to {preview_path}")
+            print("--preview only, skipping push")
+            # Print summary
+            cx = snapshot["codex"]
+            ds = snapshot["deepseek"]
+            if cx["ok"]:
+                print(f"Codex:     {cx['short_label']} {cx['short_used_percent']}% reset {cx['short_reset']} [{cx['status']}]")
+                if cx["long_used_percent"] is not None:
+                    print(f"          {cx['long_label']} {cx['long_used_percent']}%")
+            else:
+                print(f"Codex:     {cx['raw_status']}")
+            if ds["ok"]:
+                print(f"DeepSeek:  {ds['symbol']}{ds['balance']:.2f} [{ds['status']}]")
+            else:
+                print(f"DeepSeek:  {ds['raw_status']}")
+            return True
+
+        result = push_canvas(payload)
+    elif text_mode:
         cx_text = format_codex_text(snapshot["codex"])
         ds_text = format_deepseek_text(snapshot["deepseek"])
         print(f"Codex:     {cx_text.replace(chr(10), ' / ')}")
@@ -727,6 +1065,10 @@ def main():
         help=f"Save preview PNG to {QUOTE0_PREVIEW_PATH} and skip push"
     )
     parser.add_argument(
+        "--canvas", action="store_true",
+        help="Use Canvas API instead of Image API (server-side rendering)"
+    )
+    parser.add_argument(
         "--text", action="store_true",
         help="Use Text API instead of Image API (v0.1 compat)"
     )
@@ -759,8 +1101,8 @@ def main():
         ok = debug_json()
         sys.exit(0 if ok else 1)
 
-    # ── default / --preview / --text ───────────────────────────────────────
-    success = run(preview=args.preview, text_mode=args.text)
+    # ── default / --preview / --text / --canvas ────────────────────────────────
+    success = run(preview=args.preview, text_mode=args.text, canvas_mode=args.canvas)
     sys.exit(0 if success else 1)
 
 
