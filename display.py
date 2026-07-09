@@ -126,7 +126,7 @@ def _is_retryable(result: dict) -> bool:
     return False
 
 
-def get_codex_usage(retries: int = 2, delay: float = 2.0):
+def get_codex_usage(retries: int = 4, delay: float = 3.0):
     """Fetch OpenAI Codex usage with retry on transient failures."""
     for attempt in range(1 + retries):
         try:
