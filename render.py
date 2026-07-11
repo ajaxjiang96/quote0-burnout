@@ -19,8 +19,16 @@ FONT_PATH = "/System/Library/Fonts/Menlo.ttc"
 PIXEL_FONT = Path(__file__).parent / "assets" / "fonts" / "Minecraftia-Regular.ttf"
 OP_FONT    = Path(__file__).parent / "assets" / "fonts" / "PixelOperator.ttf"
 VCR_FONT   = Path(__file__).parent / "assets" / "fonts" / "VCR_OSD_MONO_1.001.ttf"
-LOGO_CODEX    = Image.open(Path(__file__).parent / "assets" / "logos" / "codex.png").convert("1")
-LOGO_DEEPSEEK = Image.open(Path(__file__).parent / "assets" / "logos" / "deepseek.png").convert("1")
+def _load_logo(path):
+    img = Image.open(path)
+    if img.mode == "RGBA":
+        bg = Image.new("RGBA", img.size, (255, 255, 255, 255))
+        bg.paste(img, mask=img.split()[3])
+        img = bg
+    return img.convert("L").point(lambda x: 0 if x < 200 else 255, "1")
+
+LOGO_CHATGPT    = _load_logo(Path(__file__).parent / "assets" / "logos" / "chatgpt.png")
+LOGO_DEEPSEEK = _load_logo(Path(__file__).parent / "assets" / "logos" / "deepseek.png")
 LOGO_W = 16
 LOGO_GAP = 4
 LABEL_X = PAD + LOGO_W + LOGO_GAP  # text starts after logo + gap
@@ -77,13 +85,13 @@ def _render_v5(img: Image.Image, draw: ImageDraw.ImageDraw, snap: dict):
     ds = snap.get("deepseek", {})
     ts = snap.get("updated_at", datetime.now().strftime("%H:%M"))
 
-    big = _vcr()          # 21px VCR — CODEX, labels, percentages
+    big = _vcr()          # 21px VCR — CHATGPT, labels, percentages
     mid = _op()           # 16px OP — general text
     countdown_font = ImageFont.truetype(str(VCR_FONT), 20)  # 20px VCR — countdown (bold, clear)
     time_font = ImageFont.truetype(str(VCR_FONT), 20)  # 20px VCR — timestamp (bold, clear)
 
-    LOGO_S = 16
-    logo_big = LOGO_CODEX.resize((LOGO_S, LOGO_S), Image.NEAREST)
+    LOGO_S = 20
+    logo_big = LOGO_CHATGPT.resize((LOGO_S, LOGO_S), Image.BILINEAR)
 
     def _logo_draw(logo_img, x, y):
         for dy in range(LOGO_S):
@@ -123,7 +131,7 @@ def _render_v5(img: Image.Image, draw: ImageDraw.ImageDraw, snap: dict):
     # Center header vertically in top zone
     header_zone = 28
     _logo_draw(logo_big, PAD, (header_zone - LOGO_S) // 2)
-    draw.text((PAD + LOGO_S + 4, (header_zone - 21) // 2), "CODEX", font=big, fill=BLACK)
+    draw.text((PAD + LOGO_S + 4, (header_zone - 21) // 2), "ChatGPT", font=big, fill=BLACK)
     tsw, _ = _tsize(draw, ts, time_font)
     draw.text((W - PAD - tsw, (header_zone - 18) // 2), ts, font=time_font, fill=BLACK)
 
@@ -158,7 +166,7 @@ def _render_v5(img: Image.Image, draw: ImageDraw.ImageDraw, snap: dict):
             draw.text((rx, ry + (rh - cd_h) // 2), reset, font=countdown_font, fill=BLACK)
             ry += rh + 12
     else:
-        draw.text((PAD, 56), "CODEX", font=big, fill=BLACK)
+        draw.text((PAD, 56), "ChatGPT", font=big, fill=BLACK)
         status = cx.get("raw_status", "error")
         draw.text((PAD, 80), status, font=mid, fill=BLACK)
 
