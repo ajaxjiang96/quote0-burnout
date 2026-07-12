@@ -14,15 +14,15 @@ $xml = @"
     <Description>Refresh Quote/0 Codex usage dashboard after logon and every 30 minutes, then switch next.</Description>
   </RegistrationInfo>
   <Triggers>
-    <LogonTrigger>
+    <TimeTrigger>
       <Enabled>true</Enabled>
-      <UserId>$escapedUserId</UserId>
       <Repetition>
         <Interval>PT10M</Interval>
         <Duration>P9999D</Duration>
         <StopAtDurationEnd>false</StopAtDurationEnd>
       </Repetition>
-    </LogonTrigger>
+      <StartBoundary>2026-07-12T00:00:00</StartBoundary>
+    </TimeTrigger>
   </Triggers>
   <Principals>
     <Principal id="Author">
@@ -48,7 +48,7 @@ $xml = @"
     <RunOnlyIfIdle>false</RunOnlyIfIdle>
     <DisallowStartOnRemoteAppSession>false</DisallowStartOnRemoteAppSession>
     <UseUnifiedSchedulingEngine>true</UseUnifiedSchedulingEngine>
-    <WakeToRun>false</WakeToRun>
+    <WakeToRun>true</WakeToRun>
     <ExecutionTimeLimit>PT10M</ExecutionTimeLimit>
     <Priority>7</Priority>
   </Settings>
