@@ -44,7 +44,7 @@ try {
     foreach ($kv in $envVals.GetEnumerator()) {
         [Environment]::SetEnvironmentVariable($kv.Key, $kv.Value, "Process")
     }
-    $env:QUOTE0_REFRESH_NOW = "false"
+    $env:QUOTE0_REFRESH_NOW = "true"
 
     $python = Join-Path $projectRoot ".venv\Scripts\python.exe"
     $output = & $python (Join-Path $projectRoot "display.py") 2>&1 | Out-String

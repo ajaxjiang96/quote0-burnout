@@ -18,7 +18,7 @@ $xml = @"
       <Enabled>true</Enabled>
       <UserId>$escapedUserId</UserId>
       <Repetition>
-        <Interval>PT30M</Interval>
+        <Interval>PT10M</Interval>
         <Duration>P9999D</Duration>
         <StopAtDurationEnd>false</StopAtDurationEnd>
       </Repetition>
