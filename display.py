@@ -204,10 +204,10 @@ def build_codex_snapshot(codex: dict) -> dict:
         }
 
     raw = codex.get("raw", {})
-    rate_limit = raw.get("rate_limit", {})
+    rate_limit = raw.get("rate_limit") or {}
 
-    primary = rate_limit.get("primary_window", {})
-    secondary = rate_limit.get("secondary_window", {})
+    primary = rate_limit.get("primary_window") or {}
+    secondary = rate_limit.get("secondary_window") or {}
 
     short_pct = primary.get("used_percent")
     short_reset_ts = primary.get("reset_at")
