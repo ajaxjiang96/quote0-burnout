@@ -142,26 +142,26 @@ def _render_v5(img: Image.Image, draw: ImageDraw.ImageDraw, snap: dict):
     if cx.get("ok"):
         rows = [
             (cx.get("short_label", "?"), cx.get("short_used_percent"), cx.get("short_reset", "?")),
-            (cx.get("long_label", "?"), cx.get("long_used_percent"), cx.get("long_reset", "?")),
         ]
+        long_pct = cx.get("long_used_percent")
+        if long_pct is not None and long_pct >= 0:
+            rows.append((cx.get("long_label", "?"), long_pct, cx.get("long_reset", "?")))
         bx, bw = 64, 160
         rh = 32
-        # Center two bars vertically in content zone
+        rx = bx + bw + 8
+        # Center rows vertically in content zone
         content_top = header_zone + 1
         content_h = H - content_top
-        total_bars_h = rh * 2 + 12
+        total_bars_h = rh * len(rows) + 12 * (len(rows) - 1)
         bar_start_y = content_top + (content_h - total_bars_h) // 2
         ry = bar_start_y
-        rx = bx + bw + 8
 
         for label, used, reset in rows:
-            # Use baseline alignment for consistent visual centering
             ascent, descent = big.getmetrics()
             baseline_y = ry + (rh + ascent - descent) // 2
             draw.text((PAD, baseline_y - ascent), label, font=big, fill=BLACK)
             remaining = 100 - used if used is not None else 0
             _bar(bx, ry, bw, rh, remaining, f"{remaining:.0f}%")
-            # Center countdown vertically with bar
             _, cd_h = _tsize(draw, reset, countdown_font)
             draw.text((rx, ry + (rh - cd_h) // 2), reset, font=countdown_font, fill=BLACK)
             ry += rh + 12
