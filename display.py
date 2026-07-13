@@ -225,15 +225,29 @@ def build_codex_snapshot(codex: dict) -> dict:
     except (ValueError, TypeError):
         long_pct = None
 
+    has_secondary = long_pct is not None
+    short_label = "5h"  # default
+
+    # Label: derive from window seconds if secondary is missing
+    if not has_secondary:
+        secs = primary.get("limit_window_seconds")
+        if secs and secs >= 86400:
+            short_label = "Week"
+        elif secs and secs >= 3600:
+            hours = secs // 3600
+            short_label = f"{hours}h"
+        else:
+            short_label = "Now"
+
     return {
         "ok": True,
-        "short_label": "5h",
+        "short_label": short_label,
         "short_used_percent": short_pct,
         "short_reset": _time_until(short_reset_ts) if short_reset_ts else "?",
-        "long_label": "Week",
-        "long_used_percent": long_pct,
-        "long_reset": _time_until(long_reset_ts) if long_reset_ts else "?",
-        "status": _pct_status(short_pct),
+        "long_label": "Week" if has_secondary else None,
+        "long_used_percent": long_pct if has_secondary else None,
+        "long_reset": _time_until(long_reset_ts) if long_reset_ts and has_secondary else None,
+        "status": _pct_status(short_pct if short_pct is not None else long_pct),
         "raw_status": "",
     }
 
@@ -583,31 +597,32 @@ def build_canvas_payload(snapshot: dict) -> dict:
             },
         })
 
-        # Row 2: label + bar + note
-        children.append({
-            "type": "div",
-            "props": {
-                "tw": "flex flex-row items-center gap-[4px]",
-                "children": [
-                    {
-                        "type": "span",
-                        "props": {
-                            "tw": f"{FONT_LABEL} shrink-0 w-[40px]",
-                            "children": long_label,
+        # Row 2: label + bar + note (skip if no secondary window)
+        if long_used is not None and long_label:
+            children.append({
+                "type": "div",
+                "props": {
+                    "tw": "flex flex-row items-center gap-[4px]",
+                    "children": [
+                        {
+                            "type": "span",
+                            "props": {
+                                "tw": f"{FONT_LABEL} shrink-0 w-[40px]",
+                                "children": long_label,
+                            },
                         },
-                    },
-                    _bar_element(100 - long_used),
-                    {
-                        "type": "span",
-                        "props": {
-                            "tw": f"{FONT_LABEL} shrink-0 min-w-[80px]",
-                            "style": {"textAlign": "right", "whiteSpace": "nowrap"},
-                            "children": _fmt_note(long_used, long_reset),
+                        _bar_element(100 - long_used),
+                        {
+                            "type": "span",
+                            "props": {
+                                "tw": f"{FONT_LABEL} shrink-0 min-w-[80px]",
+                                "style": {"textAlign": "right", "whiteSpace": "nowrap"},
+                                "children": _fmt_note(long_used, long_reset),
+                            },
                         },
-                    },
-                ],
-            },
-        })
+                    ],
+                },
+            })
     else:
         status = cx.get("raw_status", "error")
         children.append({

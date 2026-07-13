@@ -161,8 +161,9 @@ def _render_v5(img: Image.Image, draw: ImageDraw.ImageDraw, snap: dict):
         # Row 1: 5h + bar(dots) + remaining% + reset
         y = _draw_codex_row(draw, y, short_label, short_used, short_reset, label, label, note_x)
 
-        # Row 2: Week + bar(dots) + remaining% + reset
-        y = _draw_codex_row(draw, y, long_label, long_used, long_reset, label, label, note_x)
+        # Row 2: Week + bar(dots) + remaining% + reset (skip if no secondary window)
+        if long_used is not None and long_label:
+            y = _draw_codex_row(draw, y, long_label, long_used, long_reset, label, label, note_x)
     else:
         _logo(LOGO_CODEX, y)
         draw.text((LABEL_X, y), "CODEX", font=label, fill=BLACK)
