@@ -42,7 +42,7 @@ QUOTE0_REFRESH_NOW = _env("QUOTE0_REFRESH_NOW", "false").lower() == "true"
 
 QUOTE0_IMAGE_TASK_KEY = _env("QUOTE0_IMAGE_TASK_KEY")
 QUOTE0_TEXT_TASK_KEY  = _env("QUOTE0_TEXT_TASK_KEY")
-QUOTE0_PREVIEW_PATH   = _env("QUOTE0_PREVIEW_PATH", "/tmp/quote0_burnout_preview.png")
+QUOTE0_PREVIEW_PATH   = _env("QUOTE0_PREVIEW_PATH", str(_HERE / "tmp" / "preview.png"))
 SNAPSHOT_CACHE_PATH   = _HERE / "tmp" / "last_snapshot.json"
 
 API_BASE = "https://dot.mindreset.tech"
@@ -89,6 +89,7 @@ def _window_label(minutes: int | None) -> str:
 # ── Fetch ─────────────────────────────────────────────────────────────────────
 
 CODEX_AUTH_PATH = Path.home() / ".codex" / "auth.json"
+CODEX_SESSIONS_DIR = Path.home() / ".codex" / "sessions"
 CODEX_USAGE_URL = "https://chatgpt.com/backend-api/wham/usage"
 
 
@@ -168,6 +169,181 @@ def get_codex_usage(retries: int = 4, delay: float = 3.0):
     return result
 
 
+def get_today_codex_tokens() -> dict | None:
+    """Compute today's Codex token usage from local session JSONL files.
+
+    For each of today's session files, read the cumulative ``total_token_usage``
+    that Codex/OpenAI tracks per session and take (last − first) as that
+    session's usage, then sum across all of today's sessions. This is the
+    authoritative total (the JSONL ``last_token_usage`` field is only the
+    per-turn delta and is less robust to parse).
+
+    Timestamps are compared (UTC) against local-day bounds so cross-midnight
+    and timezone offsets are handled correctly.
+    Returns dict with token totals, or None if no events found.
+    """
+    import datetime as dtmod
+    local_now = datetime.now()
+    local_today_start = local_now.replace(hour=0, minute=0, second=0, microsecond=0)
+    local_today_end = local_today_start + dtmod.timedelta(days=1)
+    utc_today_start = local_today_start.timestamp()
+    utc_today_end = local_today_end.timestamp()
+
+    KEYS = ("input_tokens", "cached_input_tokens", "output_tokens",
+            "reasoning_output_tokens", "total_tokens")
+    totals = {k: 0 for k in KEYS}
+    totals["sessions"] = 0
+    seen_sessions = set()
+
+    if not CODEX_SESSIONS_DIR.is_dir():
+        return None
+
+    for year_dir in sorted(CODEX_SESSIONS_DIR.iterdir()):
+        if not year_dir.is_dir() or not year_dir.name.isdigit():
+            continue
+        for month_dir in sorted(year_dir.iterdir()):
+            if not month_dir.is_dir() or not month_dir.name.isdigit():
+                continue
+            for day_dir in sorted(month_dir.iterdir()):
+                if not day_dir.is_dir() or not day_dir.name.isdigit():
+                    continue
+                for fpath in sorted(day_dir.glob("*.jsonl")):
+                    first_tv = None
+                    last_tv = None
+                    try:
+                        for line in fpath.read_text(encoding="utf-8").splitlines():
+                            line = line.strip()
+                            if not line:
+                                continue
+                            try:
+                                obj = json.loads(line)
+                            except json.JSONDecodeError:
+                                continue
+                            ts_str = obj.get("timestamp", "")
+                            if not ts_str:
+                                continue
+                            try:
+                                ts_dt = datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
+                                ts_unix = ts_dt.timestamp()
+                            except Exception:
+                                continue
+                            if not (utc_today_start <= ts_unix < utc_today_end):
+                                continue
+                            p = obj.get("payload", {})
+                            if obj.get("type") == "event_msg" and p.get("type") == "token_count":
+                                tv = p.get("info", {}).get("total_token_usage")
+                                if tv:
+                                    last_tv = tv
+                                    if first_tv is None:
+                                        first_tv = tv
+                    except Exception:
+                        continue
+
+                    if first_tv and last_tv:
+                        for k in KEYS:
+                            totals[k] += last_tv.get(k, 0) - first_tv.get(k, 0)
+                        seen_sessions.add(fpath.stem)
+
+    totals["sessions"] = len(seen_sessions)
+    return totals if totals["sessions"] > 0 else None
+
+
+def _fmt_tokens(n: int) -> str:
+    """Format token count for display."""
+    if n >= 1_000_000:
+        return f"{n / 1_000_000:.1f}M"
+    if n >= 1_000:
+        return f"{n / 1_000:.0f}K"
+    return str(n)
+
+
+OPENCODE_DB_PATH = Path.home() / ".local" / "share" / "opencode" / "opencode.db"
+
+
+def get_today_opencode_tokens() -> dict | None:
+    """Query opencode SQLite database for today's token usage.
+
+    Sums per-assistant-message ``tokens`` from the ``message`` table, filtered
+    by each message's ``time_created`` (when the tokens were actually
+    generated). This correctly attributes usage from long-running sessions
+    that span midnight, unlike summing per-session cumulative totals by
+    ``session.time_created``.
+
+    Input = prompt tokens (input + cache.read); Output = generated tokens
+    (output + reasoning). Same UTC+8 day bounds as Codex.
+    """
+    import datetime as dtmod
+    import sqlite3
+    import json
+
+    if not OPENCODE_DB_PATH.exists():
+        return None
+
+    local_now = datetime.now()
+    local_today_start = local_now.replace(hour=0, minute=0, second=0, microsecond=0)
+    local_today_end = local_today_start + dtmod.timedelta(days=1)
+    start_ms = int(local_today_start.timestamp() * 1000)
+    end_ms = int(local_today_end.timestamp() * 1000)
+
+    try:
+        conn = sqlite3.connect(str(OPENCODE_DB_PATH))
+        c = conn.cursor()
+        c.execute(
+            "SELECT session_id, data FROM message "
+            "WHERE time_created >= ? AND time_created < ?",
+            (start_ms, end_ms),
+        )
+        rows = c.fetchall()
+        conn.close()
+
+        in_tok = out_tok = reason = cache_read = 0
+        cost = 0.0
+        sessions = set()
+        for sid, data in rows:
+            try:
+                d = json.loads(data)
+            except Exception:
+                continue
+            if d.get("role") != "assistant":
+                continue
+            tk = d.get("tokens") or {}
+            in_tok += tk.get("input", 0)
+            cache_read += tk.get("cache", {}).get("read", 0)
+            out_tok += tk.get("output", 0)
+            reason += tk.get("reasoning", 0)
+            try:
+                cost += float(d.get("cost") or 0)
+            except (ValueError, TypeError):
+                pass
+            sessions.add(sid)
+
+        if not sessions:
+            return None
+
+        input_total = in_tok + cache_read
+        output_total = out_tok + reason
+        # Estimate cost at DeepSeek V4 Flash rates (user-specified model):
+        # input $0.14/M, cache-hit input $0.0028/M, output $0.28/M.
+        p = _OPENCODE_PRICE
+        est_cost = (
+            in_tok / 1e6 * p["input"]
+            + cache_read / 1e6 * p["cached"]
+            + output_total / 1e6 * p["output"]
+        )
+        return {
+            "input_tokens": input_total,
+            "output_tokens": output_total,
+            "reasoning_tokens": reason,
+            "cache_read_tokens": cache_read,
+            "total_tokens": input_total + output_total,
+            "sessions": len(sessions),
+            "cost": est_cost,
+            "cost_source": "est",
+        }
+    except Exception:
+        return None
+
+
 def get_deepseek_balance():
     if not DEEPSEEK_API_KEY:
         return {"ok": False, "status": "no key"}
@@ -209,6 +385,11 @@ def get_deepseek_balance():
 
 CURRENCY_SYMBOLS = {"USD": "$", "CNY": "¥", "EUR": "€", "GBP": "£"}
 
+# Token pricing (USD per 1M tokens), current as of 2026-07.
+# Codex uses GPT-5.6 Sol; Opencode uses DeepSeek V4 Flash.
+_CODEX_PRICE = {"input": 5.0, "cached": 0.50, "output": 30.0}        # GPT-5.6 Sol
+_OPENCODE_PRICE = {"input": 0.14, "cached": 0.0028, "output": 0.28}  # DeepSeek V4 Flash
+
 
 def build_codex_snapshot(codex: dict) -> dict:
     """Build structured codex snapshot from wham API response."""
@@ -247,7 +428,7 @@ def build_codex_snapshot(codex: dict) -> dict:
     except (ValueError, TypeError):
         long_pct = None
 
-    return {
+    result = {
         "ok": True,
         "short_label": "Week",
         "short_used_percent": short_pct,
@@ -258,6 +439,28 @@ def build_codex_snapshot(codex: dict) -> dict:
         "status": _pct_status(short_pct),
         "raw_status": "",
     }
+
+    today_tokens = get_today_codex_tokens()
+    if today_tokens:
+        result["today_tokens"] = today_tokens["total_tokens"]
+        result["today_input_tokens"] = today_tokens["input_tokens"]
+        result["today_output_tokens"] = today_tokens["output_tokens"]
+        result["today_sessions"] = today_tokens["sessions"]
+        # Estimate cost at GPT-5.6 Sol rates (user-specified model):
+        # input $5/M, cached input $0.50/M, output $30/M.
+        in_tok  = today_tokens["input_tokens"]
+        cached  = today_tokens["cached_input_tokens"]
+        out_tok = today_tokens["output_tokens"]
+        reason  = today_tokens["reasoning_output_tokens"]
+        p = _CODEX_PRICE
+        result["today_cost"] = (
+            in_tok / 1e6 * p["input"]
+            + cached / 1e6 * p["cached"]
+            + (out_tok + reason) / 1e6 * p["output"]
+        )
+        result["today_cost_source"] = "est"
+
+    return result
 
 
 def build_deepseek_snapshot(ds: dict) -> dict:
@@ -292,16 +495,34 @@ def build_deepseek_snapshot(ds: dict) -> dict:
     }
 
 
+def build_opencode_snapshot() -> dict:
+    """Build structured opencode snapshot from local SQLite DB."""
+    today = get_today_opencode_tokens()
+    if not today:
+        return {"ok": False, "raw_status": "no data"}
+
+    return {
+        "ok": True,
+        "today_tokens": today["total_tokens"],
+        "today_input_tokens": today["input_tokens"],
+        "today_output_tokens": today["output_tokens"],
+        "today_sessions": today["sessions"],
+        "cost": today["cost"],
+        "status": "ok",
+    }
+
+
 def build_snapshot() -> dict:
     """Fetch and build full snapshot, falling back to cache on failure."""
     codex_raw = get_codex_usage()
     ds_raw = get_deepseek_balance()
     codex = build_codex_snapshot(codex_raw)
     deepseek = build_deepseek_snapshot(ds_raw)
+    opencode = build_opencode_snapshot()
     now = datetime.now().strftime("%H:%M")
 
     if codex.get("ok"):
-        snap = {"codex": codex, "deepseek": deepseek, "updated_at": now, "_cached": False}
+        snap = {"codex": codex, "deepseek": deepseek, "opencode": opencode, "updated_at": now, "_cached": False}
         SNAPSHOT_CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
         try:
             SNAPSHOT_CACHE_PATH.write_text(json.dumps(snap, indent=2), encoding="utf-8")
@@ -316,11 +537,13 @@ def build_snapshot() -> dict:
             cached["_cached"] = True
             if deepseek.get("ok"):
                 cached["deepseek"] = deepseek
+            if opencode.get("ok"):
+                cached["opencode"] = opencode
             return cached
     except Exception:
         pass
 
-    return {"codex": codex, "deepseek": deepseek, "updated_at": now, "_cached": False}
+    return {"codex": codex, "deepseek": deepseek, "opencode": opencode, "updated_at": now, "_cached": False}
 
 
 # ── Legacy normalize (v0.2–v0.3 compat) ───────────────────────────────────────
@@ -504,12 +727,20 @@ def run(preview: bool = False, text_mode: bool = False):
             # Also print a summary for preview
             cx = snapshot["codex"]
             ds = snapshot["deepseek"]
+            oc = snapshot["opencode"]
             if cx["ok"]:
                 print(f"Codex:     {cx['short_label']} {cx['short_used_percent']}% reset {cx['short_reset']} [{cx['status']}]")
                 if cx["long_used_percent"] is not None:
                     print(f"          {cx['long_label']} {cx['long_used_percent']}%")
+                tok = cx.get("today_tokens")
+                if tok is not None:
+                    print(f"Tokens:    {_fmt_tokens(tok)} today")
             else:
                 print(f"Codex:     {cx['raw_status']}")
+            if oc.get("ok"):
+                print(f"Opencode:  {_fmt_tokens(oc['today_tokens'])} total ({_fmt_tokens(oc['today_input_tokens'])} in / {_fmt_tokens(oc['today_output_tokens'])} out)")
+            else:
+                print(f"Opencode:  {oc.get('raw_status', 'no data')}")
             if ds["ok"]:
                 print(f"DeepSeek:  {ds['symbol']}{ds['balance']:.2f} [{ds['status']}]")
             else:
@@ -604,6 +835,12 @@ def check() -> int:
             codex_ok = True
         else:
             print(_status("usage", False, sn_codex["raw_status"]))
+
+        tokens = get_today_codex_tokens()
+        if tokens:
+            print(_status("today tokens", True, f"{_fmt_tokens(tokens['total_tokens'])} across {tokens['sessions']} session(s)"))
+        else:
+            print(_status("today tokens", True, "no sessions yet"))
     else:
         print(_status("usage", False, "no auth"))
 
@@ -628,14 +865,27 @@ def check() -> int:
 
     print()
 
+    # ── Opencode ──────────────────────────────────────────────────────────
+    print("Opencode:")
+    oc_ok = False
+    oc = get_today_opencode_tokens()
+    if oc:
+        print(_status("today tokens", True, f"{_fmt_tokens(oc['total_tokens'])} total ({_fmt_tokens(oc['input_tokens'])} in / {_fmt_tokens(oc['output_tokens'])} out) across {oc['sessions']} session(s)"))
+        oc_ok = True
+    else:
+        print(_status("today tokens", True, "no sessions today"))
+
+    print()
+
     # ── Render ─────────────────────────────────────────────────────────────
     print("Render:")
     render_ok = False
-    if codex_ok or ds_ok:
+    if codex_ok or ds_ok or oc_ok:
         try:
             snapshot = {
                 "codex": build_codex_snapshot(get_codex_usage() if codex_ok else {"ok": False, "status": "n/a"}),
                 "deepseek": build_deepseek_snapshot(get_deepseek_balance() if ds_ok else {"ok": False, "status": "n/a"}),
+                "opencode": build_opencode_snapshot(),
                 "updated_at": datetime.now().strftime("%H:%M"),
             }
             png = render_image(snapshot)

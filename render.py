@@ -1,7 +1,7 @@
 """
 Render a 296×152 pure black/white PNG for Quote/0 e-ink display.
 
-v0.6: zellux-style dual-row Codex. Logo icons + aligned layout.
+v0.7: Today's combined token total + per-software IN/OUT breakdown.
 """
 
 from __future__ import annotations
@@ -19,6 +19,8 @@ FONT_PATH = "/System/Library/Fonts/Menlo.ttc"
 PIXEL_FONT = Path(__file__).parent / "assets" / "fonts" / "Minecraftia-Regular.ttf"
 OP_FONT    = Path(__file__).parent / "assets" / "fonts" / "PixelOperator.ttf"
 VCR_FONT   = Path(__file__).parent / "assets" / "fonts" / "VCR_OSD_MONO_1.001.ttf"
+
+
 def _load_logo(path):
     img = Image.open(path)
     if img.mode == "RGBA":
@@ -27,11 +29,9 @@ def _load_logo(path):
         img = bg
     return img.convert("L").point(lambda x: 0 if x < 200 else 255, "1")
 
-LOGO_CHATGPT    = _load_logo(Path(__file__).parent / "assets" / "logos" / "chatgpt.png")
-LOGO_DEEPSEEK = _load_logo(Path(__file__).parent / "assets" / "logos" / "deepseek.png")
-LOGO_W = 16
-LOGO_GAP = 4
-LABEL_X = PAD + LOGO_W + LOGO_GAP  # text starts after logo + gap
+
+LOGO_CHATGPT   = _load_logo(Path(__file__).parent / "assets" / "logos" / "chatgpt.png")
+LOGO_DEEPSEEK  = _load_logo(Path(__file__).parent / "assets" / "logos" / "deepseek.png")
 
 BLACK = 0
 WHITE = 255
@@ -41,6 +41,7 @@ WHITE = 255
 def _font(size: int) -> ImageFont.FreeTypeFont:
     return ImageFont.truetype(FONT_PATH, size)
 
+
 _pixel_font_cache = None
 
 def _pixel() -> ImageFont.FreeTypeFont:
@@ -49,6 +50,7 @@ def _pixel() -> ImageFont.FreeTypeFont:
         _pixel_font_cache = ImageFont.truetype(str(PIXEL_FONT), 8)
     return _pixel_font_cache
 
+
 _op_font_cache = None
 
 def _op() -> ImageFont.FreeTypeFont:
@@ -56,6 +58,7 @@ def _op() -> ImageFont.FreeTypeFont:
     if _op_font_cache is None:
         _op_font_cache = ImageFont.truetype(str(OP_FONT), 16)
     return _op_font_cache
+
 
 _vcr_font_cache = None
 
@@ -71,6 +74,32 @@ def _tsize(draw: ImageDraw.ImageDraw, text: str, font: ImageFont.FreeTypeFont):
     return bbox[2] - bbox[0], bbox[3] - bbox[1]
 
 
+def _fmt_tokens(n: int) -> str:
+    if n >= 1_000_000:
+        return f"{n / 1_000_000:.1f}M"
+    if n >= 1_000:
+        return f"{n / 1_000:.0f}K"
+    return str(n)
+
+
+def _fmt_cost(n: float) -> str:
+    """Format dollar cost compactly."""
+    if n >= 1000:
+        return f"${n / 1000:.1f}k"
+    if n >= 1:
+        return f"${n:.2f}"
+    return f"${n:.3f}"
+
+
+_op_size_cache = {}
+
+
+def _opsize(size: int):
+    if size not in _op_size_cache:
+        _op_size_cache[size] = ImageFont.truetype(str(OP_FONT), size)
+    return _op_size_cache[size]
+
+
 _op14_font = None
 
 def _op14() -> ImageFont.FreeTypeFont:
@@ -80,111 +109,164 @@ def _op14() -> ImageFont.FreeTypeFont:
     return _op14_font
 
 
+# ── Helpers ──────────────────────────────────────────────────────────────
+
+def _logo_draw(img, logo_img, x, y):
+    s = logo_img.width
+    for dy in range(s):
+        for dx in range(s):
+            if logo_img.getpixel((dx, dy)) == 0:
+                img.putpixel((x + dx, y + dy), BLACK)
+
+
+def _divider(draw, cy):
+    x, gap = 0, 4
+    while x < W:
+        draw.line([(x, cy), (min(x + 5, W), cy)], fill=BLACK)
+        x += 5 + gap
+
+
+# ── Main render ──────────────────────────────────────────────────────────
+
 def _render_v5(img: Image.Image, draw: ImageDraw.ImageDraw, snap: dict):
     cx = snap.get("codex", {})
+    oc = snap.get("opencode", {})
     ds = snap.get("deepseek", {})
     ts = snap.get("updated_at", datetime.now().strftime("%H:%M"))
 
-    big = _vcr()          # 21px VCR — CHATGPT, labels, percentages
-    mid = _op()           # 16px OP — general text
-    countdown_font = ImageFont.truetype(str(VCR_FONT), 20)  # 20px VCR — countdown (bold, clear)
-    time_font = ImageFont.truetype(str(VCR_FONT), 20)  # 20px VCR — timestamp (bold, clear)
+    big = _vcr()
+    mid = _op()
+    pix = _pixel()
+    time_font = ImageFont.truetype(str(VCR_FONT), 18)
 
-    LOGO_S = 20
-    logo_big = LOGO_CHATGPT.resize((LOGO_S, LOGO_S), Image.BILINEAR)
+    # ── Compute combined totals + cost ──────────────────────────────────
+    c_tok  = cx.get("today_tokens", 0)  if cx.get("ok") else 0
+    c_in   = cx.get("today_input_tokens", 0)  if cx.get("ok") else 0
+    c_out  = cx.get("today_output_tokens", 0) if cx.get("ok") else 0
+    c_cost = cx.get("today_cost", 0) if cx.get("ok") else 0
+    o_tok  = oc.get("today_tokens", 0)  if oc.get("ok") else 0
+    o_in   = oc.get("today_input_tokens", 0)  if oc.get("ok") else 0
+    o_out  = oc.get("today_output_tokens", 0) if oc.get("ok") else 0
+    o_cost = oc.get("cost", 0) if oc.get("ok") else 0
 
-    def _logo_draw(logo_img, x, y):
-        for dy in range(LOGO_S):
-            for dx in range(LOGO_S):
-                if logo_img.getpixel((dx, dy)) == 0:
-                    img.putpixel((x + dx, y + dy), BLACK)
+    total    = c_tok + o_tok
+    total_in = c_in + o_in
+    total_out= c_out + o_out
+    total_cost = c_cost + o_cost
 
-    def _divider(cy):
-        x, gap = 0, 4
-        while x < W:
-            draw.line([(x, cy), (min(x + 5, W), cy)], fill=BLACK)
-            x += 5 + gap
+    # ── Header with progress bar ────────────────────────────────────────
+    header_zone = 22
+    vcr18 = ImageFont.truetype(str(VCR_FONT), 18)
+    vcr20 = ImageFont.truetype(str(VCR_FONT), 20)
+    vcr16 = ImageFont.truetype(str(VCR_FONT), 16)
+    GAP = 6
+    ry = header_zone + 4
 
-    def _bar(dx, dy, dw, dh, pct, label=""):
-        pct = max(0, min(100, pct or 0))
-        draw.rectangle([dx, dy, dx + dw - 1, dy + dh - 1], outline=BLACK)
-        fill = int((dw - 2) * pct / 100)
-        if fill > 0:
-            draw.rectangle([dx + 1, dy + 1, dx + fill, dy + dh - 2], fill=BLACK)
-        sp = 2
-        sx = dx + 1 + fill
-        for ry in range(dy + 1 + sp, dy + dh - 1 - sp + 1, 4):
-            for rx in range(dx + 1 + sp, dx + dw - 1 - sp + 1, 4):
-                if rx >= sx:
-                    draw.point((rx, ry), fill=BLACK)
-        fs = 20
-        fnt = ImageFont.truetype(str(VCR_FONT), fs)
-        tw, _ = draw.textbbox((0, 0), label, font=fnt)[2:]
-        if tw < fill:
-            tx = dx + (fill - tw) // 2
-            draw.text((tx, dy + (dh - fs) // 2 - 1), label, font=fnt, fill=WHITE)
-        else:
-            tx = dx + dw + 4
-            draw.text((tx, dy + (dh - fs) // 2 - 1), label, font=fnt, fill=BLACK)
+    def _b(text, x, y, font):
+        draw.text((x, y), text, font=font, fill=BLACK)
+        draw.text((x + 1, y), text, font=font, fill=BLACK)
 
-    # ── Header ──────────────────────────────────────────────────────────
-    # Center header vertically in top zone
-    header_zone = 28
-    _logo_draw(logo_big, PAD, (header_zone - LOGO_S) // 2)
-    draw.text((PAD + LOGO_S + 4, (header_zone - 21) // 2), "ChatGPT", font=big, fill=BLACK)
-    tsw, _ = _tsize(draw, ts, time_font)
-    draw.text((W - PAD - tsw, (header_zone - 18) // 2), ts, font=time_font, fill=BLACK)
+    def _w(text, x, y, font):
+        draw.text((x, y), text, font=font, fill=WHITE)
+        draw.text((x + 1, y), text, font=font, fill=WHITE)
 
-    # ── Divider ─────────────────────────────────────────────────────────
-    _divider(header_zone)
+    def _vcy(text, font, y0, h):
+        """Return anchor-y that centers the glyph's ink box in [y0, y0+h]."""
+        bb = draw.textbbox((0, 0), text, font=font)
+        # center of ink box = (bb[1]+bb[3])/2 from anchor; align to box center
+        return round(y0 + (h - (bb[1] + bb[3])) / 2)
 
-    # ── Codex rows ──────────────────────────────────────────────────────
+# ── Header line ─────────────────────────────────────────────────────
+    tw, th = _tsize(draw, "Tokens", vcr18)
+    _b("Tokens", PAD, (header_zone - th) // 2, vcr18)
+    tsw, _ = _tsize(draw, ts, vcr18)
+    _b(ts, W - PAD - tsw, (header_zone - th) // 2, vcr18)
+    _divider(draw, header_zone)
+
+    # ── Today hero (line 1) ─────────────────────────────────────────────
+    if total > 0:
+        today_s = f"Today  {_fmt_tokens(total)}"
+        _b(today_s, PAD, ry, vcr20)
+        if total_cost > 0:
+            cost_s = _fmt_cost(total_cost)
+            ctw, _ = _tsize(draw, cost_s, vcr20)
+            _b(cost_s, W - PAD - ctw, ry, vcr20)
+        ry += 20 + GAP
+
+    # ── Progress bar (line 2) ───────────────────────────────────────────
     if cx.get("ok"):
-        rows = [
-            (cx.get("short_label", "?"), cx.get("short_used_percent"), cx.get("short_reset", "?")),
-        ]
-        long_pct = cx.get("long_used_percent")
-        if long_pct is not None and long_pct >= 0:
-            rows.append((cx.get("long_label", "?"), long_pct, cx.get("long_reset", "?")))
-        bx, bw = 64, 160
-        rh = 32
-        rx = bx + bw + 8
-        # Center rows vertically in content zone
-        content_top = header_zone + 1
-        content_h = H - content_top
-        total_bars_h = rh * len(rows) + 12 * (len(rows) - 1)
-        bar_start_y = content_top + (content_h - total_bars_h) // 2
-        ry = bar_start_y
+        used = cx.get("short_used_percent", 0)
+        reset = cx.get("short_reset", "?")
+        remaining = 100 - used if used is not None else 0
+        bar_h = 20
+        bx = PAD
+        bw = 200                      # leave clear space on the right for countdown
+        draw.rectangle([bx, ry, bx + bw - 1, ry + bar_h - 1], outline=BLACK)
+        fill_w = int((bw - 2) * remaining / 100) if remaining > 0 else 0
+        # REMAINING portion = solid black (capacity left)
+        if fill_w > 0:
+            draw.rectangle([bx + 1, ry + 1, bx + fill_w, ry + bar_h - 2], fill=BLACK)
+        # USED portion = white with diagonal dot hatch (consumed)
+        for sy in range(ry + 3, ry + bar_h - 2, 3):
+            for sx in range(bx + 1 + fill_w, bx + bw - 1, 3):
+                draw.point((sx, sy), fill=BLACK)
 
-        for label, used, reset in rows:
-            ascent, descent = big.getmetrics()
-            baseline_y = ry + (rh + ascent - descent) // 2
-            draw.text((PAD, baseline_y - ascent), label, font=big, fill=BLACK)
-            remaining = 100 - used if used is not None else 0
-            _bar(bx, ry, bw, rh, remaining, f"{remaining:.0f}%")
-            _, cd_h = _tsize(draw, reset, countdown_font)
-            draw.text((rx, ry + (rh - cd_h) // 2), reset, font=countdown_font, fill=BLACK)
-            ry += rh + 12
-    else:
-        draw.text((PAD, 56), "ChatGPT", font=big, fill=BLACK)
-        status = cx.get("raw_status", "error")
-        draw.text((PAD, 80), status, font=mid, fill=BLACK)
+        # Countdown: plain black text on white, to the RIGHT of the bar (no pill)
+        cd_font = vcr20
+        cd_x = bx + bw + 6
+        cd_y = _vcy(reset, cd_font, ry, bar_h)
+        _b(reset, cd_x, cd_y, cd_font)
 
-    # ── DeepSeek ─────────────────────────────────────────────────────────
-    if ds.get("ok"):
-        _divider(ry + 4)
-        ry += 16
-        dlogo = LOGO_DEEPSEEK.resize((LOGO_S, LOGO_S), Image.NEAREST)
-        _logo_draw(dlogo, PAD, ry)
-        draw.text((PAD + LOGO_S + 6, ry + 2), "DEEPSEEK", font=mid, fill=BLACK)
-        ry += 24
-        bal_val = ds.get("balance")
+        # % label = remaining%, white on black (inside filled region)
+        pct_font = vcr20
+        pct_label = f"{int(remaining)}%"
+        pct_tw, pct_th = _tsize(draw, pct_label, pct_font)
+        pct_y = _vcy(pct_label, pct_font, ry, bar_h)
+        if fill_w == 0:
+            _b(pct_label, bx + 2, pct_y, pct_font)
+        elif fill_w >= pct_tw + 4:
+            pct_x = bx + (fill_w - pct_tw) // 2
+            _w(pct_label, pct_x, pct_y, pct_font)
+        else:
+            _b(pct_label, bx + 2, pct_y, pct_font)
+        ry += bar_h + GAP
+
+    # ── Codex section ────────────────────────────────────────────────────
+    if c_tok > 0:
+        line = f"Codex  {_fmt_tokens(c_in)}/{_fmt_tokens(c_out)}"
+        _b(line, PAD, ry, vcr18)
+        if c_cost > 0:
+            cost_str = _fmt_cost(c_cost)
+            ctw, _ = _tsize(draw, cost_str, vcr18)
+            _b(cost_str, W - PAD - ctw, ry, vcr18)
+        ry += 14 + GAP
+
+    # ── Opencode section ─────────────────────────────────────────────────
+    if o_tok > 0:
+        line = f"OpenC  {_fmt_tokens(o_in)}/{_fmt_tokens(o_out)}"
+        _b(line, PAD, ry, vcr18)
+        if o_cost > 0:
+            cost_str = _fmt_cost(o_cost)
+            ctw, _ = _tsize(draw, cost_str, vcr18)
+            _b(cost_str, W - PAD - ctw, ry, vcr18)
+        ry += 14 + GAP
+
+    # ── DeepSeek section ────────────────────────────────────────────────
+    if ds.get("ok") and ds.get("balance") is not None:
+        bal = ds["balance"]
         sym = ds.get("symbol", "$")
-        draw.text((PAD, ry), f"{sym}{bal_val:.2f}" if bal_val is not None else "?", font=big, fill=BLACK)
-        _, bh = _tsize(draw, "0", big)
-        status = ds.get("status", "ok").upper()
-        sw, _ = _tsize(draw, status, small)
-        draw.text((W - PAD - sw, ry + bh - 6), status, font=small, fill=BLACK)
+        _b(f"DeepSeek  {sym}{bal:.2f}", PAD, ry, vcr18)
+        ry += 14 + GAP
+
+    # ── Footer separator ──────────────────────────────────────────────
+    _divider(draw, H - 6)
+
+    # ── No-data fallback ────────────────────────────────────────────────
+    if total == 0:
+        no_data = "No data"
+        nw, nh = _tsize(draw, no_data, vcr18)
+        cy = (header_zone + H) // 2
+        _b(no_data, (W - nw) // 2, cy - nh // 2, vcr18)
 
 
 # ── Legacy ────────────────────────────────────────────────────────────────
@@ -226,12 +308,12 @@ def render_image(arg, deepseek_text=None):
 
 if __name__ == "__main__":
     snap = {
-        "codex": {"ok": True, "short_label": "5h", "short_used_percent": 72,
-                  "short_reset": "2h13m", "long_label": "Week",
-                  "long_used_percent": 41, "long_reset": "123h3m",
-                  "status": "ok"},
-        "deepseek": {"ok": True, "balance": 18.42, "currency": "USD",
-                      "symbol": "$", "status": "ok"},
+        "codex": {"ok": True, "short_label": "Week", "short_used_percent": 36,
+                  "short_reset": "5d22h", "long_label": "5h",
+                  "long_used_percent": None, "long_reset": "?",
+                  "status": "ok", "today_tokens": 1520000},
+        "deepseek": {"ok": False, "balance": None, "currency": "?",
+                      "symbol": "?", "status": "error"},
         "updated_at": "16:40",
     }
     png = render_image(snap)
