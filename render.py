@@ -126,6 +126,14 @@ def _divider(draw, cy):
         x += 5 + gap
 
 
+def _leader(draw, x0, x1, y, step=4):
+    """Draw a dotted leader (row of 1px dots) from x0 to x1 at height y."""
+    x = x0
+    while x < x1:
+        draw.point((x, y), fill=BLACK)
+        x += step
+
+
 # ── Main render ──────────────────────────────────────────────────────────
 
 def _render_v5(img: Image.Image, draw: ImageDraw.ImageDraw, snap: dict):
@@ -159,7 +167,7 @@ def _render_v5(img: Image.Image, draw: ImageDraw.ImageDraw, snap: dict):
     vcr18 = ImageFont.truetype(str(VCR_FONT), 18)
     vcr20 = ImageFont.truetype(str(VCR_FONT), 20)
     vcr16 = ImageFont.truetype(str(VCR_FONT), 16)
-    GAP = 6
+    GAP = 10
     ry = header_zone + 4
 
     def _b(text, x, y, font):
@@ -176,21 +184,28 @@ def _render_v5(img: Image.Image, draw: ImageDraw.ImageDraw, snap: dict):
         # center of ink box = (bb[1]+bb[3])/2 from anchor; align to box center
         return round(y0 + (h - (bb[1] + bb[3])) / 2)
 
-# ── Header line ─────────────────────────────────────────────────────
+    # ── Header ───────────────────────────────────────────────────────
     tw, th = _tsize(draw, "Tokens", vcr18)
     _b("Tokens", PAD, (header_zone - th) // 2, vcr18)
     tsw, _ = _tsize(draw, ts, vcr18)
     _b(ts, W - PAD - tsw, (header_zone - th) // 2, vcr18)
     _divider(draw, header_zone)
 
-    # ── Today hero (line 1) ─────────────────────────────────────────────
+    # ── Today hero (centered) ───────────────────────────────────────
     if total > 0:
-        today_s = f"Today  {_fmt_tokens(total)}"
-        _b(today_s, PAD, ry, vcr20)
+        ry += 6
+        num_s = _fmt_tokens(total)
+        nw, _ = _tsize(draw, num_s, vcr20)
         if total_cost > 0:
             cost_s = _fmt_cost(total_cost)
-            ctw, _ = _tsize(draw, cost_s, vcr20)
-            _b(cost_s, W - PAD - ctw, ry, vcr20)
+            cw, _ = _tsize(draw, cost_s, vcr20)
+            gap = 44
+            group_w = nw + gap + cw
+            gx = (W - group_w) // 2
+            _b(num_s, gx, ry, vcr20)
+            _b(cost_s, gx + nw + gap, ry, vcr20)
+        else:
+            _b(num_s, (W - nw) // 2, ry, vcr20)
         ry += 20 + GAP
 
     # ── Progress bar (line 2) ───────────────────────────────────────────
@@ -213,7 +228,7 @@ def _render_v5(img: Image.Image, draw: ImageDraw.ImageDraw, snap: dict):
 
         # Countdown: plain black text on white, to the RIGHT of the bar (no pill)
         cd_font = vcr20
-        cd_x = bx + bw + 6
+        cd_x = bx + bw + 14
         cd_y = _vcy(reset, cd_font, ry, bar_h)
         _b(reset, cd_x, cd_y, cd_font)
 
@@ -231,32 +246,27 @@ def _render_v5(img: Image.Image, draw: ImageDraw.ImageDraw, snap: dict):
             _b(pct_label, bx + 2, pct_y, pct_font)
         ry += bar_h + GAP
 
-    # ── Codex section ────────────────────────────────────────────────────
+    # ── Source ledger (typographic) ─────────────────────────────────────
+    row_font = vcr16
+    rgap = 10
+
+    def _ledger_row(name, in_t, out_t, cost):
+        nonlocal ry
+        left = f"{name}  {_fmt_tokens(in_t)}/{_fmt_tokens(out_t)}"
+        _b(left, PAD, ry, row_font)
+        if cost > 0:
+            cs = _fmt_cost(cost)
+            cw, _ = _tsize(draw, cs, row_font)
+            cx0 = W - PAD - cw
+            _b(cs, cx0, ry, row_font)
+            lw, _ = _tsize(draw, left, row_font)
+            _leader(draw, PAD + lw + 3, cx0 - 3, ry + row_font.size // 2, step=4)
+        ry += row_font.size + rgap
+
     if c_tok > 0:
-        line = f"Codex  {_fmt_tokens(c_in)}/{_fmt_tokens(c_out)}"
-        _b(line, PAD, ry, vcr18)
-        if c_cost > 0:
-            cost_str = _fmt_cost(c_cost)
-            ctw, _ = _tsize(draw, cost_str, vcr18)
-            _b(cost_str, W - PAD - ctw, ry, vcr18)
-        ry += 14 + GAP
-
-    # ── Opencode section ─────────────────────────────────────────────────
+        _ledger_row("Codex", c_in, c_out, c_cost)
     if o_tok > 0:
-        line = f"OpenC  {_fmt_tokens(o_in)}/{_fmt_tokens(o_out)}"
-        _b(line, PAD, ry, vcr18)
-        if o_cost > 0:
-            cost_str = _fmt_cost(o_cost)
-            ctw, _ = _tsize(draw, cost_str, vcr18)
-            _b(cost_str, W - PAD - ctw, ry, vcr18)
-        ry += 14 + GAP
-
-    # ── DeepSeek section ────────────────────────────────────────────────
-    if ds.get("ok") and ds.get("balance") is not None:
-        bal = ds["balance"]
-        sym = ds.get("symbol", "$")
-        _b(f"DeepSeek  {sym}{bal:.2f}", PAD, ry, vcr18)
-        ry += 14 + GAP
+        _ledger_row("OpenC", o_in, o_out, o_cost)
 
     # ── Footer separator ──────────────────────────────────────────────
     _divider(draw, H - 6)
