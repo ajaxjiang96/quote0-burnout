@@ -233,17 +233,21 @@ def _render_v5(img: Image.Image, draw: ImageDraw.ImageDraw, snap: dict):
         _b(reset, cd_x, cd_y, cd_font)
 
         # % label = remaining%, white on black (inside filled region)
+        # when remaining ≤ 20%, place label in the white used area instead
         pct_font = vcr20
         pct_label = f"{int(remaining)}%"
         pct_tw, pct_th = _tsize(draw, pct_label, pct_font)
         pct_y = _vcy(pct_label, pct_font, ry, bar_h)
-        if fill_w == 0:
-            _b(pct_label, bx + 2, pct_y, pct_font)
-        elif fill_w >= pct_tw + 4:
-            pct_x = bx + (fill_w - pct_tw) // 2
-            _w(pct_label, pct_x, pct_y, pct_font)
+        if remaining > 20:
+            if fill_w == 0:
+                _b(pct_label, bx + 2, pct_y, pct_font)
+            elif fill_w >= pct_tw + 4:
+                pct_x = bx + (fill_w - pct_tw) // 2
+                _w(pct_label, pct_x, pct_y, pct_font)
+            else:
+                _b(pct_label, bx + 2, pct_y, pct_font)
         else:
-            _b(pct_label, bx + 2, pct_y, pct_font)
+            _b(pct_label, bx + fill_w + 2, pct_y, pct_font)
         ry += bar_h + GAP
 
     # ── Source ledger (typographic) ─────────────────────────────────────
@@ -252,7 +256,7 @@ def _render_v5(img: Image.Image, draw: ImageDraw.ImageDraw, snap: dict):
 
     def _ledger_row(name, in_t, out_t, cost):
         nonlocal ry
-        left = f"{name}  {_fmt_tokens(in_t)}/{_fmt_tokens(out_t)}"
+        left = f"{name}  {_fmt_tokens(in_t)} / {_fmt_tokens(out_t)}"
         _b(left, PAD, ry, row_font)
         if cost > 0:
             cs = _fmt_cost(cost)

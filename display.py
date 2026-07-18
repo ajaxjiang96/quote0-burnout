@@ -454,7 +454,7 @@ def build_codex_snapshot(codex: dict) -> dict:
         reason  = today_tokens["reasoning_output_tokens"]
         p = _CODEX_PRICE
         result["today_cost"] = (
-            in_tok / 1e6 * p["input"]
+            (in_tok - cached) / 1e6 * p["input"]
             + cached / 1e6 * p["cached"]
             + (out_tok + reason) / 1e6 * p["output"]
         )
