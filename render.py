@@ -191,22 +191,21 @@ def _render_v5(img: Image.Image, draw: ImageDraw.ImageDraw, snap: dict):
     _b(ts, W - PAD - tsw, (header_zone - th) // 2, vcr18)
     _divider(draw, header_zone)
 
-    # ── Today hero (centered) ───────────────────────────────────────
-    if total > 0:
-        ry += 6
-        num_s = _fmt_tokens(total)
-        nw, _ = _tsize(draw, num_s, vcr20)
-        if total_cost > 0:
-            cost_s = _fmt_cost(total_cost)
-            cw, _ = _tsize(draw, cost_s, vcr20)
-            gap = 44
-            group_w = nw + gap + cw
-            gx = (W - group_w) // 2
-            _b(num_s, gx, ry, vcr20)
-            _b(cost_s, gx + nw + gap, ry, vcr20)
-        else:
-            _b(num_s, (W - nw) // 2, ry, vcr20)
-        ry += 20 + GAP
+    # ── Today hero (centered, always visible) ─────────────────────────
+    ry += 6
+    num_s = _fmt_tokens(total)
+    nw, _ = _tsize(draw, num_s, vcr20)
+    if total_cost > 0:
+        cost_s = _fmt_cost(total_cost)
+        cw, _ = _tsize(draw, cost_s, vcr20)
+        gap = 44
+        group_w = nw + gap + cw
+        gx = (W - group_w) // 2
+        _b(num_s, gx, ry, vcr20)
+        _b(cost_s, gx + nw + gap, ry, vcr20)
+    else:
+        _b(num_s, (W - nw) // 2, ry, vcr20)
+    ry += 20 + GAP
 
     # ── Progress bar (line 2) ───────────────────────────────────────────
     if cx.get("ok"):
@@ -267,20 +266,13 @@ def _render_v5(img: Image.Image, draw: ImageDraw.ImageDraw, snap: dict):
             _leader(draw, PAD + lw + 3, cx0 - 3, ry + row_font.size // 2, step=4)
         ry += row_font.size + rgap
 
-    if c_tok > 0:
+    if cx.get("ok") or total == 0:
         _ledger_row("Codex", c_in, c_out, c_cost)
-    if o_tok > 0:
+    if oc.get("ok") or total == 0:
         _ledger_row("OpenC", o_in, o_out, o_cost)
 
     # ── Footer separator ──────────────────────────────────────────────
     _divider(draw, H - 6)
-
-    # ── No-data fallback ────────────────────────────────────────────────
-    if total == 0:
-        no_data = "No data"
-        nw, nh = _tsize(draw, no_data, vcr18)
-        cy = (header_zone + H) // 2
-        _b(no_data, (W - nw) // 2, cy - nh // 2, vcr18)
 
 
 # ── Legacy ────────────────────────────────────────────────────────────────
