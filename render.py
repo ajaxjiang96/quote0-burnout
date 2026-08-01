@@ -187,12 +187,11 @@ def _render_v5(img: Image.Image, draw: ImageDraw.ImageDraw, snap: dict):
     # ── Header ───────────────────────────────────────────────────────
     tw, th = _tsize(draw, "Tokens", vcr18)
     _b("Tokens", PAD, (header_zone - th) // 2, vcr18)
-    tsw, _ = _tsize(draw, ts, vcr18)
-    # date (US format "Sat, Aug 1") centered in the free space between title and time
+    # date (US format "Sat, Aug 1") right after the title
     date_s = datetime.now().strftime("%a, %b %d").replace(" 0", " ")
     dw, _ = _tsize(draw, date_s, vcr18)
-    d_x = PAD + tw + (W - PAD - tsw - (PAD + tw) - dw) // 2
-    _b(date_s, d_x, (header_zone - th) // 2, vcr18)
+    _b(date_s, PAD + tw + 8, (header_zone - th) // 2, vcr18)
+    tsw, _ = _tsize(draw, ts, vcr18)
     _b(ts, W - PAD - tsw, (header_zone - th) // 2, vcr18)
     _divider(draw, header_zone)
 
