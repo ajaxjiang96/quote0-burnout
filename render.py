@@ -188,8 +188,9 @@ def _render_v5(img: Image.Image, draw: ImageDraw.ImageDraw, snap: dict):
     tw, th = _tsize(draw, "Tokens", vcr18)
     _b("Tokens", PAD, (header_zone - th) // 2, vcr18)
     tsw, _ = _tsize(draw, ts, vcr18)
-    # date (US format "Aug 01 26") centered in the free space between title and time
-    date_s = datetime.now().strftime("%b %d %y")
+    # date (US format "Aug 1, 26") centered in the free space between title and time
+    _now = datetime.now()
+    date_s = f"{_now.strftime('%b')} {_now.day}, {_now.strftime('%y')}"
     dw, _ = _tsize(draw, date_s, vcr18)
     d_x = PAD + tw + (W - PAD - tsw - (PAD + tw) - dw) // 2
     _b(date_s, d_x, (header_zone - th) // 2, vcr18)
