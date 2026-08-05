@@ -4,5 +4,6 @@ __pycache__/
 *.pyc
 *.pyo
 /tmp/
+/archive/
 logo_region_*.png
 preview_v3.pngtest_render.png

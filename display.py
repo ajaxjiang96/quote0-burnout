@@ -43,6 +43,7 @@ QUOTE0_REFRESH_NOW = _env("QUOTE0_REFRESH_NOW", "false").lower() == "true"
 QUOTE0_IMAGE_TASK_KEY = _env("QUOTE0_IMAGE_TASK_KEY")
 QUOTE0_TEXT_TASK_KEY  = _env("QUOTE0_TEXT_TASK_KEY")
 QUOTE0_PREVIEW_PATH   = _env("QUOTE0_PREVIEW_PATH", str(_HERE / "tmp" / "preview.png"))
+QUOTE0_ARCHIVE_DIR    = _env("QUOTE0_ARCHIVE_DIR", str(_HERE / "archive"))
 SNAPSHOT_CACHE_PATH   = _HERE / "tmp" / "last_snapshot.json"
 
 API_BASE = "https://dot.mindreset.tech"
@@ -650,6 +651,24 @@ def format_deepseek_text(sn: dict) -> str:
 
 # ── Push ──────────────────────────────────────────────────────────────────────
 
+def _archive_image(png_bytes: bytes) -> Path | None:
+    """Save png into the daily archive (overwrites same-day file).
+
+    Keeps the last pushed image of each day at ``archive/<YYYY-MM-DD>.png``.
+    Returns the saved path, or None if archiving failed.
+    """
+    try:
+        day_dir = Path(QUOTE0_ARCHIVE_DIR)
+        day_dir.mkdir(parents=True, exist_ok=True)
+        day_key = datetime.now().strftime("%Y-%m-%d")
+        dest = day_dir / f"{day_key}.png"
+        dest.write_bytes(png_bytes)
+        return dest
+    except Exception as e:
+        print(f"  [archive] failed: {e}", file=sys.stderr)
+        return None
+
+
 def push_image(png_bytes: bytes) -> dict:
     url = f"{API_BASE}/api/authV2/open/device/{QUOTE0_DEVICE_ID}/image"
     payload = {
@@ -703,6 +722,7 @@ def push_text(payload: dict) -> dict:
 
 def run(preview: bool = False, text_mode: bool = False):
     snapshot = build_snapshot()
+    archive_path = None
 
     if text_mode:
         cx_text = format_codex_text(snapshot["codex"])
@@ -749,10 +769,15 @@ def run(preview: bool = False, text_mode: bool = False):
 
         result = push_image(png)
 
+        # Keep the last pushed image of each day (overwritten on every push).
+        archive_path = _archive_image(png) if result.get("ok") else None
+
     output = {
         "ok": result.get("ok"),
         "status": result.get("status"),
     }
+    if archive_path is not None:
+        output["archive"] = str(archive_path)
     body = result.get("body", {})
     if isinstance(body, dict):
         output["message"] = body.get("message", "")
