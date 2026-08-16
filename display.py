@@ -390,15 +390,13 @@ CURRENCY_SYMBOLS = {"USD": "$", "CNY": "¥", "EUR": "€", "GBP": "£"}
 # Codex uses GPT-5.6 Sol; Opencode uses DeepSeek V4 Flash.
 _CODEX_PRICE = {"input": 5.0, "cached": 0.50, "output": 30.0}  # GPT-5.6 Sol
 
-# DeepSeek V4 Flash 0731 (USD per 1M tokens):
-#   old flat rate        — $0.14 / $0.0028 / $0.28   (until 2026-08-16 16:00 UTC)
-#   new off-peak rate    — $0.22 / $0.0070 / $0.66   (after cutover)
-#   new peak rate        — $0.44 / $0.0140 / $1.32   (peak windows)
+# DeepSeek V4 Flash 0731 (USD per 1M tokens), peak/off-peak rate card
+# effective 2026-08-16 16:00 UTC:
+#   off-peak — $0.22 / $0.0070 / $0.66
+#   peak     — $0.44 / $0.0140 / $1.32
 # Peak windows (UTC): 01:00–04:00 and 06:00–10:00; all other hours off-peak.
-_OPENCODE_PRICE_FLAT     = {"input": 0.14,  "cached": 0.0028, "output": 0.28}
-_OPENCODE_PRICE_OFFPEAK  = {"input": 0.22,  "cached": 0.0070, "output": 0.66}
-_OPENCODE_PRICE_PEAK     = {"input": 0.44,  "cached": 0.0140, "output": 1.32}
-_OPENCODE_PRICE_EFFECTIVE_TS = datetime(2026, 8, 16, 16, 0, tzinfo=timezone.utc).timestamp()
+_OPENCODE_PRICE_OFFPEAK = {"input": 0.22,  "cached": 0.0070, "output": 0.66}
+_OPENCODE_PRICE_PEAK    = {"input": 0.44,  "cached": 0.0140, "output": 1.32}
 
 
 def _opencode_price_for(time_created_ms) -> dict:
@@ -407,8 +405,6 @@ def _opencode_price_for(time_created_ms) -> dict:
         ts = time_created_ms / 1000.0
     except (TypeError, ValueError):
         return _OPENCODE_PRICE_OFFPEAK
-    if ts < _OPENCODE_PRICE_EFFECTIVE_TS:
-        return _OPENCODE_PRICE_FLAT
     hour = datetime.fromtimestamp(ts, tz=timezone.utc).hour
     if (1 <= hour < 4) or (6 <= hour < 10):
         return _OPENCODE_PRICE_PEAK
