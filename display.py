@@ -290,7 +290,7 @@ def get_today_opencode_tokens() -> dict | None:
         conn = sqlite3.connect(str(OPENCODE_DB_PATH))
         c = conn.cursor()
         c.execute(
-            "SELECT session_id, data FROM message "
+            "SELECT session_id, time_created, data FROM message "
             "WHERE time_created >= ? AND time_created < ?",
             (start_ms, end_ms),
         )
@@ -298,9 +298,9 @@ def get_today_opencode_tokens() -> dict | None:
         conn.close()
 
         in_tok = out_tok = reason = cache_read = 0
-        cost = 0.0
+        est_cost = 0.0
         sessions = set()
-        for sid, data in rows:
+        for sid, t_ms, data in rows:
             try:
                 d = json.loads(data)
             except Exception:
@@ -308,14 +308,22 @@ def get_today_opencode_tokens() -> dict | None:
             if d.get("role") != "assistant":
                 continue
             tk = d.get("tokens") or {}
-            in_tok += tk.get("input", 0)
-            cache_read += tk.get("cache", {}).get("read", 0)
-            out_tok += tk.get("output", 0)
-            reason += tk.get("reasoning", 0)
-            try:
-                cost += float(d.get("cost") or 0)
-            except (ValueError, TypeError):
-                pass
+            t_in = tk.get("input", 0)
+            t_cache = tk.get("cache", {}).get("read", 0)
+            t_out = tk.get("output", 0)
+            t_reason = tk.get("reasoning", 0)
+            in_tok += t_in
+            cache_read += t_cache
+            out_tok += t_out
+            reason += t_reason
+            # Estimate cost at DeepSeek V4 Flash rates (user-specified model),
+            # applying the peak/off-peak rate for each message's timestamp.
+            p = _opencode_price_for(t_ms)
+            est_cost += (
+                t_in / 1e6 * p["input"]
+                + t_cache / 1e6 * p["cached"]
+                + (t_out + t_reason) / 1e6 * p["output"]
+            )
             sessions.add(sid)
 
         if not sessions:
@@ -323,14 +331,6 @@ def get_today_opencode_tokens() -> dict | None:
 
         input_total = in_tok + cache_read
         output_total = out_tok + reason
-        # Estimate cost at DeepSeek V4 Flash rates (user-specified model):
-        # input $0.14/M, cache-hit input $0.0028/M, output $0.28/M.
-        p = _OPENCODE_PRICE
-        est_cost = (
-            in_tok / 1e6 * p["input"]
-            + cache_read / 1e6 * p["cached"]
-            + output_total / 1e6 * p["output"]
-        )
         return {
             "input_tokens": input_total,
             "output_tokens": output_total,
@@ -386,10 +386,33 @@ def get_deepseek_balance():
 
 CURRENCY_SYMBOLS = {"USD": "$", "CNY": "¥", "EUR": "€", "GBP": "£"}
 
-# Token pricing (USD per 1M tokens), current as of 2026-07.
+# Token pricing (USD per 1M tokens), current as of 2026-08-16.
 # Codex uses GPT-5.6 Sol; Opencode uses DeepSeek V4 Flash.
-_CODEX_PRICE = {"input": 5.0, "cached": 0.50, "output": 30.0}        # GPT-5.6 Sol
-_OPENCODE_PRICE = {"input": 0.14, "cached": 0.0028, "output": 0.28}  # DeepSeek V4 Flash
+_CODEX_PRICE = {"input": 5.0, "cached": 0.50, "output": 30.0}  # GPT-5.6 Sol
+
+# DeepSeek V4 Flash 0731 (USD per 1M tokens):
+#   old flat rate        — $0.14 / $0.0028 / $0.28   (until 2026-08-16 16:00 UTC)
+#   new off-peak rate    — $0.22 / $0.0070 / $0.66   (after cutover)
+#   new peak rate        — $0.44 / $0.0140 / $1.32   (peak windows)
+# Peak windows (UTC): 01:00–04:00 and 06:00–10:00; all other hours off-peak.
+_OPENCODE_PRICE_FLAT     = {"input": 0.14,  "cached": 0.0028, "output": 0.28}
+_OPENCODE_PRICE_OFFPEAK  = {"input": 0.22,  "cached": 0.0070, "output": 0.66}
+_OPENCODE_PRICE_PEAK     = {"input": 0.44,  "cached": 0.0140, "output": 1.32}
+_OPENCODE_PRICE_EFFECTIVE_TS = datetime(2026, 8, 16, 16, 0, tzinfo=timezone.utc).timestamp()
+
+
+def _opencode_price_for(time_created_ms) -> dict:
+    """Pick DeepSeek V4 Flash rate for a message's timestamp (peak/off-peak)."""
+    try:
+        ts = time_created_ms / 1000.0
+    except (TypeError, ValueError):
+        return _OPENCODE_PRICE_OFFPEAK
+    if ts < _OPENCODE_PRICE_EFFECTIVE_TS:
+        return _OPENCODE_PRICE_FLAT
+    hour = datetime.fromtimestamp(ts, tz=timezone.utc).hour
+    if (1 <= hour < 4) or (6 <= hour < 10):
+        return _OPENCODE_PRICE_PEAK
+    return _OPENCODE_PRICE_OFFPEAK
 
 
 def build_codex_snapshot(codex: dict) -> dict:
