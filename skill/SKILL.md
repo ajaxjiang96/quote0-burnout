@@ -71,6 +71,8 @@ Response shape:
 Token from `~/.claude/.credentials.json` or `CLAUDE_ACCESS_TOKEN` env var.
 
 DeepSeek: `DEEPSEEK_API_KEY` (balance) + `DEEPSEEK_MODEL` (billing-window pricing model: `deepseek-v4-flash` / `deepseek-v4-pro` / `deepseek-v4-flash-vision-exp`).
+
+OpenCode Go (second panel): `OPENCODE_GO_API_KEY` (Zen usage API) + `SECOND_PANEL` (`auto` / `deepseek` / `opencode`).
 If OAuth credentials are unavailable, `display.py` falls back to `claude /usage`
 and parses the current session/week rows.
 

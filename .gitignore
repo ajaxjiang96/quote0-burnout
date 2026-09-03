@@ -3,6 +3,8 @@
 __pycache__/
 *.pyc
 *.pyo
+.DS_Store
 /tmp/
 logo_region_*.png
-preview_v3.pngtest_render.png
+preview_v3.png
+test_render.png

@@ -1,5 +1,5 @@
 // quote0-widget.js — JSBox iOS 桌面小组件
-// 显示和 Quote/0 墨水屏完全同步的 Codex + Claude + DeepSeek 用量数据
+// 显示和 Quote/0 墨水屏完全同步的 Codex + Claude + DeepSeek/OpenCode 用量数据
 // 改下面 CONFIG 的值即可使用
 
 // ═══════════════════════ CONFIG ═══════════════════════
@@ -8,6 +8,7 @@ const CODEX_ACCT   = "";  // ~/.codex/auth.json → tokens.account_id（可选�
 const CLAUDE_TOKEN = "";  // ~/.claude/.credentials.json → claudeAiOauth.accessToken
 const DEEPSEEK_KEY = "";  // DeepSeek API key（sk-...）
 const DS_MODEL = "deepseek-v4-flash";  // 计价模型：deepseek-v4-flash / deepseek-v4-pro
+const OPENCODE_KEY = "";  // OpenCode Go 用量 API key（第二面板，优先于 DeepSeek）
 // ══════════════════════════════════════════════════════
 
 // DeepSeek 官方价目（百万 tokens，缓存未命中输入 / 输出；来源 api-docs.deepseek.com，2026-08 抓取）
@@ -132,6 +133,23 @@ function getDeepSeek() {
   } catch (e) { return { ok: false, msg: String(e) }; }
 }
 
+// OpenCode Go（OpenCode Zen "Go" 订阅）：dollar 限额 $12/5h、$30/周、$60/月
+function getOpenCode() {
+  if (!OPENCODE_KEY) return { ok: false, msg: "无 key" };
+  try {
+    const r = $http.get({
+      url: "https://opencode.ai/zen/go/v1/usage",
+      header: { "Authorization": "Bearer " + OPENCODE_KEY, "Accept": "application/json", "User-Agent": "quote0-widget" },
+      timeout: 8
+    });
+    if (r.error) return { ok: false, msg: "请求失败" };
+    const u = (r.data && r.data.usage) || {};
+    const roll = u.rolling || {};
+    const wk = u.weekly || {};
+    return { ok: true, used: roll.percent || 0, reset: roll.resetsAt || null, wkUsed: wk.percent || null, wkReset: wk.resetsAt || null };
+  } catch (e) { return { ok: false, msg: String(e) }; }
+}
+
 // ── 工具函数 ──────────────────────────────────────────
 
 function fmtTime(ts) {
@@ -176,6 +194,10 @@ $widget.setTimeline(function(ctx) {
   const cx = getCodex();
   const cl = getClaude();
   const ds = getDeepSeek();
+  const oc = getOpenCode();
+  // 第二面板：优先 OpenCode Go，回退 DeepSeek
+  const useOc = oc.ok;
+  const useDs = ds.ok && !useOc;
   const family = ctx.family;  // 0=small, 1=medium, 2=large
 
   const now = new Date();
@@ -190,11 +212,13 @@ $widget.setTimeline(function(ctx) {
 
   const rows = [];
 
-  // 标题行：时间 + 状态
+  // 标题行：时间 + 状态（第二面板显示 O 或 D 其一）
   const cxBadge = cx.ok ? cxStatus(cx.sUsed) : "✕";
   const clBadge = cl.ok ? cxStatus(cl.sUsed) : "✕";
-  const dsBadge = ds.ok ? dsStatus(ds.balance, ds.avail) : "✕";
-  rows.push({ text: "C " + cxBadge + "  Cl " + clBadge + "  D " + dsBadge + "  " + timeStr, size: sSize });
+  const secondBadge = useOc ? cxStatus(oc.used)
+                            : (useDs ? dsStatus(ds.balance, ds.avail) : "✕");
+  const secondTag = useOc ? "O" : (useDs ? "D" : " ");
+  rows.push({ text: "C " + cxBadge + "  Cl " + clBadge + "  " + secondTag + " " + secondBadge + "  " + timeStr, size: sSize });
 
   if (cx.ok) {
     const sr = 100 - cx.sUsed;
@@ -217,8 +241,15 @@ $widget.setTimeline(function(ctx) {
     rows.push({ text: "Claude: " + (cl.msg || "error"), size: fSize });
   }
 
-  // 有 DeepSeek 才画分隔线
-  if (ds.ok) {
+  if (useOc) {
+    rows.push({ text: "—".repeat(compact ? 14 : 20), size: sSize });
+    const or_ = 100 - oc.used;
+    rows.push({ text: "OC  5h " + pctBar(oc.used, barW) + " " + or_.toFixed(0) + "% " + fmtTime(oc.reset), size: fSize });
+    if (oc.wkUsed != null) {
+      const ow_ = 100 - oc.wkUsed;
+      rows.push({ text: "    Wk " + pctBar(oc.wkUsed, barW) + " " + ow_.toFixed(0) + "% " + fmtTime(oc.wkReset), size: fSize });
+    }
+  } else if (useDs) {
     rows.push({ text: "—".repeat(compact ? 14 : 20), size: sSize });
     const w = dsWindow(ds.currency);
     rows.push({ text: ds.symbol + ds.balance.toFixed(2) + "  " + w.label + " " + ds.symbol + w.in.toFixed(2) + "  " + w.cd, size: fSize + 4 });

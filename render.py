@@ -21,6 +21,7 @@ OP_FONT    = Path(__file__).parent / "assets" / "fonts" / "PixelOperator.ttf"
 LOGO_CODEX    = Image.open(Path(__file__).parent / "assets" / "logos" / "codex.png").convert("1")
 LOGO_CLAUDE   = Image.open(Path(__file__).parent / "assets" / "logos" / "claude.png").convert("1")
 LOGO_DEEPSEEK = Image.open(Path(__file__).parent / "assets" / "logos" / "deepseek.png").convert("1")
+LOGO_OPENCODE = Image.open(Path(__file__).parent / "assets" / "logos" / "opencode.png").convert("1")
 LOGO_W = 16
 LOGO_GAP = 4
 LABEL_X = PAD + LOGO_W + LOGO_GAP  # text starts after logo + gap
@@ -213,11 +214,35 @@ def _render_v5(img: Image.Image, draw: ImageDraw.ImageDraw, snap: dict):
     # ── CLAUDE ──────────────────────────────────────────────────────────
     y = _draw_panel(y, LOGO_CLAUDE, "CLAUDE", cl, note_x)
 
-    # ── DEEPSEEK (compact one-row: balance + billing-window badge) ─────
+    # ── Second panel (compact one-row; DEEPSEEK or OPENCODE-GO) ────────
     ds = snap.get("deepseek", {})
+    oc = snap.get("opencode", {})
+    second = snap.get("second_panel")
+    if second not in ("deepseek", "opencode"):
+        second = "deepseek" if ds.get("ok") else ("opencode" if oc.get("ok") else "none")
+    if second == "none":
+        return
     y += DIVIDER_GAP_TOP
     y = _divider(draw, y)
     y += DIVIDER_GAP_BOTTOM
+
+    if second == "opencode":
+        _logo(LOGO_OPENCODE, y)
+        draw.text((LABEL_X, y), "OPENCODE-GO", font=label, fill=BLACK)
+        if oc.get("ok"):
+            r = oc.get("rolling", {})
+            used_s = f"{r['used_percent']}%" if r.get("used_percent") is not None else "?"
+            wk = oc.get("weekly", {})
+            wk_s = f" Wk {wk['used_percent']}%" if wk.get("used_percent") is not None else ""
+            note = f"{used_s} reset {r.get('reset', '?')}{wk_s}"
+            nw, nh = _tsize(draw, note, small)
+            _, lh_ = _tsize(draw, "OPENCODE-GO", label)
+            draw.text((W - PAD - nw, y + (lh_ - nh) // 2), note, font=small, fill=BLACK)
+        else:
+            draw.text((LABEL_X + 110, y), oc.get("raw_status", "error"), font=label, fill=BLACK)
+        return
+
+    # DEEPSEEK: balance + billing-window badge
     _logo(LOGO_DEEPSEEK, y)
     draw.text((LABEL_X, y), "DEEPSEEK", font=label, fill=BLACK)
     if ds.get("ok"):
@@ -297,6 +322,15 @@ if __name__ == "__main__":
                      "factor": 0.5, "price_in": 0.22, "price_out": 0.66,
                      "ends_in": 6600, "countdown": "1h50m",
                      "next_window": "PEAK"},
+        "opencode": {"ok": True,
+                     "rolling": {"used_percent": 6, "reset": "2h13m"},
+                     "weekly": {"used_percent": 8, "reset": "4d2h"},
+                     "monthly": {"used_percent": 4, "reset": "17d"},
+                     "short_label": "5h", "short_used_percent": 6,
+                     "short_reset": "2h13m", "long_label": "Week",
+                     "long_used_percent": 8, "long_reset": "4d2h",
+                     "status": "ok"},
+        "second_panel": "opencode",
         "updated_at": "16:40",
     }
     png = render_image(snap)
