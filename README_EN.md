@@ -1,6 +1,6 @@
 # quote0-burnout
 
-AI usage dashboard for MindReset Quote/0 e-ink display — OpenAI Codex + DeepSeek.
+AI usage dashboard for MindReset Quote/0 e-ink display — OpenAI Codex + Claude.
 
 [中文](README.md)
 
@@ -15,14 +15,16 @@ AI usage dashboard for MindReset Quote/0 e-ink display — OpenAI Codex + DeepSe
 5h  [████████████░░░░░] 89%  4h41m
 Week [████████████░░░░░░] 69%  5d23h
 ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─
-◆ DEEPSEEK
-$18.42                        OK
+◆ CLAUDE
+5h  [████████████░░░░░] 42%  2h13m
+Week [████████░░░░░░░░] 61%  3d4h
 ```
 
-- **Codex**: dual-row (5h / Week) with inline dot-grid bar. Shows remaining% + reset countdown.
-- **DeepSeek**: balance in 21px VCR OSD Mono + status badge.
-- **Fonts**: PixelOperator 16px / VCR OSD Mono 21px / Minecraftia 8px.
+- **Codex / Claude**: matched-size dual-row panels (5h / Week) with inline dot-grid bars. Shows remaining% + reset countdown.
+- **Icons**: Codex and Claude both use 16×16 monochrome PNGs; Claude is an e-ink binary version of the Claude symbol.
+- **Fonts**: PixelOperator 16px / Minecraftia 8px.
 - Codex data via direct OAuth API — **no CLI dependency**.
+- Claude data follows CodexBar's Claude Code OAuth usage API. Tokens are read from env, `~/.claude/.credentials.json`, or macOS Keychain, with `claude /usage` as a fallback.
 
 > Full design spec, API reference, and rendering details in [`skill/`](skill/).
 
@@ -43,8 +45,8 @@ cp config.example.env .env
 |----------|----------|-------------|
 | `QUOTE0_API_KEY` | ✓ | Quote/0 API key |
 | `QUOTE0_DEVICE_ID` | ✓ | Device ID |
-| `DEEPSEEK_API_KEY` | | DeepSeek API key |
 | `CODEX_ACCESS_TOKEN` | | Override Codex token (default: ~/.codex/auth.json) |
+| `CLAUDE_ACCESS_TOKEN` | | Override Claude token (default: ~/.claude/.credentials.json or macOS Keychain; fallback: `claude /usage`) |
 
 ## Usage
 
@@ -71,6 +73,7 @@ python display.py --check
 ```
 
 - **Codex "no auth"** — run `codex` to re-authenticate
+- **Claude "no auth"** — run `claude` to re-authenticate, confirm macOS Keychain access, or set `CLAUDE_ACCESS_TOKEN`
 - **Push 404** — delete and re-add the IMAGE_API card in Dot. App Content Studio
 - **Schedule not updating** — `launchctl kickstart gui/$(id -u)/com.ajax.quote0-burnout`
 

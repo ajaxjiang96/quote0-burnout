@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-quote0-burnout v0.5 — fetch usage, build snapshot, render dashboard, push to Quote/0.
+quote0-burnout v0.7 — fetch usage, build snapshot, render dashboard, push to Quote/0.
 
 Usage:
   python display.py                   # Image API (default)
@@ -19,10 +19,12 @@ import argparse
 import base64
 import json
 import os
+import re
 import subprocess
 import sys
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import requests
 from render import render_image
@@ -36,7 +38,7 @@ def _env(key: str, default: str = "") -> str:
 
 QUOTE0_API_KEY     = _env("QUOTE0_API_KEY")
 QUOTE0_DEVICE_ID   = _env("QUOTE0_DEVICE_ID")
-DEEPSEEK_API_KEY   = _env("DEEPSEEK_API_KEY")
+CLAUDE_ACCESS_TOKEN = _env("CLAUDE_ACCESS_TOKEN") or _env("CODEXBAR_CLAUDE_OAUTH_TOKEN")
 QUOTE0_REFRESH_NOW = _env("QUOTE0_REFRESH_NOW", "false").lower() == "true"
 
 QUOTE0_IMAGE_TASK_KEY = _env("QUOTE0_IMAGE_TASK_KEY")
@@ -58,19 +60,6 @@ def _pct_status(pct: int | None) -> str:
     return "ok"
 
 
-def _balance_status(balance: float | None, is_available: bool | None) -> str:
-    """DeepSeek balance → ok / warn / hot / unknown / error."""
-    if balance is None:
-        return "unknown"
-    if is_available is False:
-        return "hot"
-    if balance < 3:
-        return "hot"
-    if balance < 10:
-        return "warn"
-    return "ok"
-
-
 def _window_label(minutes: int | None) -> str:
     """windowMinutes → human label."""
     if minutes is None:
@@ -88,6 +77,12 @@ def _window_label(minutes: int | None) -> str:
 
 CODEX_AUTH_PATH = Path.home() / ".codex" / "auth.json"
 CODEX_USAGE_URL = "https://chatgpt.com/backend-api/wham/usage"
+CLAUDE_AUTH_PATH = Path.home() / ".claude" / ".credentials.json"
+CLAUDE_USAGE_URL = "https://api.anthropic.com/api/oauth/usage"
+CLAUDE_BETA_HEADER = "oauth-2025-04-20"
+CLAUDE_USER_AGENT = _env("CLAUDE_USER_AGENT", "claude-code/2.1.0")
+CLAUDE_CLI = _env("CLAUDE_CLI", "claude")
+CLAUDE_KEYCHAIN_SERVICE = "Claude Code-credentials"
 
 
 def _load_codex_token():
@@ -138,47 +133,282 @@ def get_codex_usage():
         return {"ok": False, "status": "error", "detail": str(e)[:200]}
 
 
-def get_deepseek_balance():
-    if not DEEPSEEK_API_KEY:
-        return {"ok": False, "status": "no key"}
+def _extract_claude_access_token(payload: str) -> str:
+    """Extract Claude Code OAuth access token from a credentials JSON payload."""
+    auth = json.loads(payload)
+    oauth = auth.get("claudeAiOauth", {})
+    token = oauth.get("accessToken") or oauth.get("access_token") or ""
+    if isinstance(token, str):
+        return token.strip()
+    return ""
+
+
+def _claude_keychain_services() -> list[str]:
+    """Return likely Claude Code Keychain service names, with the canonical name first."""
+    services = [CLAUDE_KEYCHAIN_SERVICE]
+    try:
+        result = subprocess.run(
+            ["/usr/bin/security", "dump-keychain"],
+            capture_output=True,
+            text=True,
+            timeout=8,
+            check=False,
+        )
+    except Exception:
+        return services
+
+    if result.returncode != 0:
+        return services
+
+    for service in re.findall(r'"svce"<blob>="(Claude Code-credentials[^"]*)"', result.stdout):
+        if service not in services:
+            services.append(service)
+    return services
+
+
+def _load_claude_token_from_keychain() -> str:
+    """Return Claude Code OAuth access token from macOS Keychain."""
+    accounts = []
+    for account in (os.environ.get("USER", ""), os.environ.get("LOGNAME", ""), Path.home().name):
+        account = account.strip()
+        if account and account not in accounts:
+            accounts.append(account)
+    accounts.append("")
+
+    for service in _claude_keychain_services():
+        for account in accounts:
+            cmd = ["/usr/bin/security", "find-generic-password", "-s", service]
+            if account:
+                cmd.extend(["-a", account])
+            cmd.append("-w")
+
+            try:
+                result = subprocess.run(cmd, capture_output=True, text=True, timeout=4, check=False)
+            except Exception:
+                continue
+            if result.returncode != 0 or not result.stdout.strip():
+                continue
+
+            try:
+                token = _extract_claude_access_token(result.stdout)
+            except (json.JSONDecodeError, TypeError):
+                continue
+            if token:
+                return token
+
+    raise FileNotFoundError("No Claude OAuth token found in macOS Keychain.")
+
+
+def _load_claude_token() -> str:
+    """Return Claude Code OAuth access token from env, credentials file, or Keychain."""
+    if CLAUDE_ACCESS_TOKEN.strip():
+        return CLAUDE_ACCESS_TOKEN.strip()
+
+    file_error: Exception | None = None
+    if CLAUDE_AUTH_PATH.exists():
+        try:
+            with open(CLAUDE_AUTH_PATH) as f:
+                token = _extract_claude_access_token(f.read())
+        except (json.JSONDecodeError, TypeError) as e:
+            file_error = e
+        else:
+            if token:
+                return token
+            file_error = ValueError("Claude credentials file exists but has no claudeAiOauth.accessToken.")
 
     try:
+        return _load_claude_token_from_keychain()
+    except FileNotFoundError as e:
+        if file_error:
+            raise file_error
+        raise FileNotFoundError(
+            f"No Claude credentials at {CLAUDE_AUTH_PATH} or macOS Keychain. "
+            "Run `claude` to authenticate first, or set CLAUDE_ACCESS_TOKEN in .env."
+        ) from e
+
+
+def _parse_claude_cli_reset(value: str, now: datetime | None = None) -> str | None:
+    """Parse Claude CLI reset text, e.g. 'Jul 2 at 12:29pm (Asia/Shanghai)'."""
+    text = value.strip()
+    tz = timezone.utc
+
+    tz_match = re.search(r"\(([^)]+)\)\s*$", text)
+    if tz_match:
+        try:
+            tz = ZoneInfo(tz_match.group(1))
+        except Exception:
+            tz = timezone.utc
+        text = text[:tz_match.start()].strip()
+
+    match = re.match(
+        r"([A-Za-z]{3,9})\s+(\d{1,2})(?:st|nd|rd|th)?\s+at\s+"
+        r"(\d{1,2})(?::(\d{2}))?\s*([ap]m)",
+        text,
+        re.IGNORECASE,
+    )
+    if not match:
+        return None
+
+    month_token, day, hour, minute, meridiem = match.groups()
+    minute = minute or "00"
+    try:
+        month = datetime.strptime(month_token[:3].title(), "%b").month
+    except ValueError:
+        return None
+
+    base = now or datetime.now(tz)
+    if base.tzinfo is None:
+        base = base.replace(tzinfo=tz)
+    else:
+        base = base.astimezone(tz)
+
+    hour_i = int(hour) % 12
+    if meridiem.lower() == "pm":
+        hour_i += 12
+
+    candidate = datetime(
+        base.year,
+        month,
+        int(day),
+        hour_i,
+        int(minute),
+        tzinfo=tz,
+    )
+    if candidate < base - timedelta(days=1):
+        candidate = candidate.replace(year=base.year + 1)
+
+    return candidate.isoformat()
+
+
+def _parse_claude_cli_window(line: str, now: datetime | None = None) -> dict:
+    pct_match = re.search(
+        r":\s*(\d+(?:\.\d+)?)%\s*(used|left|remaining)?",
+        line,
+        re.IGNORECASE,
+    )
+    if not pct_match:
+        return {}
+
+    pct = float(pct_match.group(1))
+    qualifier = (pct_match.group(2) or "used").lower()
+    if qualifier in {"left", "remaining"}:
+        pct = 100 - pct
+    pct = max(0, min(100, pct))
+
+    window = {"utilization": int(round(pct))}
+
+    reset_match = re.search(r"\bresets\s+(.+)$", line, re.IGNORECASE)
+    if reset_match:
+        reset_at = _parse_claude_cli_reset(reset_match.group(1), now=now)
+        if reset_at:
+            window["resets_at"] = reset_at
+
+    return window
+
+
+def parse_claude_cli_usage(text: str, now: datetime | None = None) -> dict:
+    """Parse `claude /usage` text into the OAuth-shaped usage windows we render."""
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    lowered = [(line.lower(), line) for line in lines]
+
+    def find_line(prefix: str) -> str | None:
+        prefix_l = prefix.lower()
+        for line_l, line in lowered:
+            if line_l.startswith(prefix_l):
+                return line
+        return None
+
+    session_line = find_line("Current session:")
+    week_line = find_line("Current week (all models):") or find_line("Current week:")
+
+    raw = {}
+    if session_line:
+        window = _parse_claude_cli_window(session_line, now=now)
+        if window:
+            raw["five_hour"] = window
+    if week_line:
+        window = _parse_claude_cli_window(week_line, now=now)
+        if window:
+            raw["seven_day"] = window
+
+    return raw
+
+
+def get_claude_usage_from_cli():
+    """Fetch Claude subscription usage via `claude /usage` when OAuth credentials are absent."""
+    try:
+        result = subprocess.run(
+            [CLAUDE_CLI, "/usage"],
+            capture_output=True,
+            text=True,
+            timeout=25,
+            check=False,
+        )
+    except FileNotFoundError:
+        return {"ok": False, "status": "no cli", "detail": f"`{CLAUDE_CLI}` not found"}
+    except subprocess.TimeoutExpired:
+        return {"ok": False, "status": "timeout", "detail": f"`{CLAUDE_CLI} /usage` timed out"}
+    except Exception as e:
+        return {"ok": False, "status": "cli error", "detail": str(e)[:200]}
+
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout or "").strip()[:200]
+        return {"ok": False, "status": f"cli exit {result.returncode}", "detail": detail}
+
+    raw = parse_claude_cli_usage(result.stdout)
+    if not raw:
+        return {"ok": False, "status": "parse error", "detail": result.stdout.strip()[:200]}
+
+    return {"ok": True, "raw": raw, "source": "cli"}
+
+
+def get_claude_usage():
+    """Fetch Claude subscription usage via OAuth API, falling back to Claude CLI."""
+    try:
+        access_token = _load_claude_token()
+
         r = requests.get(
-            "https://api.deepseek.com/user/balance",
+            CLAUDE_USAGE_URL,
             headers={
-                "Authorization": f"Bearer {DEEPSEEK_API_KEY}",
+                "Authorization": f"Bearer {access_token}",
                 "Accept": "application/json",
+                "Content-Type": "application/json",
+                "anthropic-beta": CLAUDE_BETA_HEADER,
+                "User-Agent": CLAUDE_USER_AGENT,
             },
-            timeout=20,
+            timeout=15,
         )
         r.raise_for_status()
-        data = r.json()
+        return {"ok": True, "raw": r.json(), "source": "oauth"}
 
-        infos = data.get("balance_infos", [])
-        usd = next(
-            (x for x in infos if x.get("currency") == "USD"),
-            infos[0] if infos else None,
-        )
-
-        if not usd:
-            return {"ok": False, "status": "no balance"}
-
+    except (FileNotFoundError, ValueError) as e:
+        cli = get_claude_usage_from_cli()
+        if cli.get("ok"):
+            return cli
         return {
-            "ok": True,
-            "amount": usd.get("total_balance"),
-            "currency": usd.get("currency", "USD"),
-            "available": data.get("is_available"),
-            "raw": data,
+            "ok": False,
+            "status": "no auth",
+            "detail": f"{str(e)}; CLI fallback: {cli.get('status', 'error')}",
         }
-
-    except Exception:
-        return {"ok": False, "status": "error"}
+    except requests.Timeout:
+        cli = get_claude_usage_from_cli()
+        return cli if cli.get("ok") else {"ok": False, "status": "timeout", "detail": cli.get("detail", "")}
+    except requests.HTTPError as e:
+        detail = ""
+        try:
+            detail = e.response.text[:200]
+        except Exception:
+            pass
+        cli = get_claude_usage_from_cli()
+        if cli.get("ok"):
+            return cli
+        return {"ok": False, "status": f"HTTP {e.response.status_code}", "detail": detail}
+    except Exception as e:
+        cli = get_claude_usage_from_cli()
+        return cli if cli.get("ok") else {"ok": False, "status": "error", "detail": str(e)[:200]}
 
 
 # ── Snapshot builder (v0.4) ────────────────────────────────────────────────────
-
-CURRENCY_SYMBOLS = {"USD": "$", "CNY": "¥", "EUR": "€", "GBP": "£"}
-
 
 def build_codex_snapshot(codex: dict) -> dict:
     """Build structured codex snapshot from wham API response."""
@@ -230,34 +460,47 @@ def build_codex_snapshot(codex: dict) -> dict:
     }
 
 
-def build_deepseek_snapshot(ds: dict) -> dict:
-    """Build structured deepseek snapshot from balance API response."""
-    if not ds.get("ok"):
-        status = ds.get("status", "error")
+def _coerce_percent(value) -> int | None:
+    try:
+        return int(float(value)) if value is not None else None
+    except (ValueError, TypeError):
+        return None
+
+
+def build_claude_snapshot(claude: dict) -> dict:
+    """Build structured Claude subscription snapshot from OAuth usage response."""
+    if not claude.get("ok"):
+        status = claude.get("status", "error")
         return {
             "ok": False,
-            "balance": None,
-            "currency": "?",
-            "symbol": "?",
+            "short_label": "?",
+            "short_used_percent": None,
+            "short_reset": "?",
+            "long_label": "?",
+            "long_used_percent": None,
+            "long_reset": "?",
             "status": "error",
             "raw_status": status,
         }
 
-    amount = ds.get("amount")
-    try:
-        amount = float(amount) if amount is not None else None
-    except (ValueError, TypeError):
-        amount = None
+    raw = claude.get("raw", {})
+    short = raw.get("five_hour") or {}
+    long = raw.get("seven_day") or raw.get("seven_day_oauth_apps") or {}
 
-    currency = ds.get("currency", "USD")
-    available = ds.get("available")
+    short_pct = _coerce_percent(short.get("utilization"))
+    long_pct = _coerce_percent(long.get("utilization"))
+    short_reset = short.get("resets_at")
+    long_reset = long.get("resets_at")
 
     return {
         "ok": True,
-        "balance": amount,
-        "currency": currency,
-        "symbol": CURRENCY_SYMBOLS.get(currency, "$"),
-        "status": _balance_status(amount, available),
+        "short_label": "5h",
+        "short_used_percent": short_pct,
+        "short_reset": _time_until(short_reset) if short_reset else "?",
+        "long_label": "Week",
+        "long_used_percent": long_pct,
+        "long_reset": _time_until(long_reset) if long_reset else "?",
+        "status": _pct_status(short_pct),
         "raw_status": "",
     }
 
@@ -265,10 +508,10 @@ def build_deepseek_snapshot(ds: dict) -> dict:
 def build_snapshot() -> dict:
     """Fetch and build full snapshot."""
     codex = get_codex_usage()
-    deepseek = get_deepseek_balance()
+    claude = get_claude_usage()
     return {
         "codex": build_codex_snapshot(codex),
-        "deepseek": build_deepseek_snapshot(deepseek),
+        "claude": build_claude_snapshot(claude),
         "updated_at": datetime.now().strftime("%H:%M"),
     }
 
@@ -328,23 +571,6 @@ def normalize_codex(codex):
     return " · ".join(parts)
 
 
-def normalize_deepseek(ds):
-    """Legacy string formatter (v0.2–v0.3)."""
-    if not ds.get("ok"):
-        return ds.get("status", "unknown")
-
-    amount = ds.get("amount")
-    if amount is None:
-        return "unknown"
-
-    symbol = CURRENCY_SYMBOLS.get(ds.get("currency", ""), "$")
-
-    try:
-        return f"{symbol}{float(amount):.2f}"
-    except Exception:
-        return str(amount)
-
-
 def format_codex_text(sn: dict) -> str:
     """Format codex snapshot for Text API."""
     if not sn.get("ok"):
@@ -363,16 +589,22 @@ def format_codex_text(sn: dict) -> str:
     return line
 
 
-def format_deepseek_text(sn: dict) -> str:
-    """Format deepseek snapshot for Text API."""
+def format_claude_text(sn: dict) -> str:
+    """Format Claude snapshot for Text API."""
     if not sn.get("ok"):
         return sn.get("raw_status", "error")
 
-    bal = sn.get("balance")
-    if bal is None:
-        return "unknown"
+    pct = sn.get("short_used_percent")
+    pct_str = f"{pct}%" if pct is not None else "?"
+    reset = sn.get("short_reset", "?")
 
-    return f"{sn['symbol']}{bal:.2f} {sn['status'].upper()}"
+    line = f"{sn['short_label']} {pct_str} reset {reset}"
+
+    long_pct = sn.get("long_used_percent")
+    if long_pct is not None:
+        line += f"\n{sn['long_label']} {long_pct}%"
+
+    return line
 
 
 # ── Push ──────────────────────────────────────────────────────────────────────
@@ -433,13 +665,13 @@ def run(preview: bool = False, text_mode: bool = False):
 
     if text_mode:
         cx_text = format_codex_text(snapshot["codex"])
-        ds_text = format_deepseek_text(snapshot["deepseek"])
+        cl_text = format_claude_text(snapshot["claude"])
         print(f"Codex:     {cx_text.replace(chr(10), ' / ')}")
-        print(f"DeepSeek:  {ds_text}")
+        print(f"Claude:    {cl_text.replace(chr(10), ' / ')}")
 
         now = snapshot["updated_at"]
         payload = {
-            "message": f"Codex {cx_text}\nDeepSeek {ds_text}",
+            "message": f"Codex {cx_text}\nClaude {cl_text}",
             "signature": now,
         }
         result = push_text(payload)
@@ -453,17 +685,19 @@ def run(preview: bool = False, text_mode: bool = False):
             print("--preview only, skipping push")
             # Also print a summary for preview
             cx = snapshot["codex"]
-            ds = snapshot["deepseek"]
+            cl = snapshot["claude"]
             if cx["ok"]:
                 print(f"Codex:     {cx['short_label']} {cx['short_used_percent']}% reset {cx['short_reset']} [{cx['status']}]")
                 if cx["long_used_percent"] is not None:
                     print(f"          {cx['long_label']} {cx['long_used_percent']}%")
             else:
                 print(f"Codex:     {cx['raw_status']}")
-            if ds["ok"]:
-                print(f"DeepSeek:  {ds['symbol']}{ds['balance']:.2f} [{ds['status']}]")
+            if cl["ok"]:
+                print(f"Claude:    {cl['short_label']} {cl['short_used_percent']}% reset {cl['short_reset']} [{cl['status']}]")
+                if cl["long_used_percent"] is not None:
+                    print(f"          {cl['long_label']} {cl['long_used_percent']}%")
             else:
-                print(f"DeepSeek:  {ds['raw_status']}")
+                print(f"Claude:    {cl['raw_status']}")
             return True
 
         result = push_image(png)
@@ -511,7 +745,7 @@ def check() -> int:
         ("QUOTE0_DEVICE_ID",      QUOTE0_DEVICE_ID,      True),
         ("QUOTE0_IMAGE_TASK_KEY", QUOTE0_IMAGE_TASK_KEY, False),
         ("QUOTE0_TEXT_TASK_KEY",  QUOTE0_TEXT_TASK_KEY,  False),
-        ("DEEPSEEK_API_KEY",      DEEPSEEK_API_KEY,      False),
+        ("CLAUDE_ACCESS_TOKEN",   CLAUDE_ACCESS_TOKEN,   False),
     ]
 
     for name, val, required in env_vars:
@@ -559,33 +793,43 @@ def check() -> int:
 
     print()
 
-    # ── DeepSeek ───────────────────────────────────────────────────────────
-    print("DeepSeek:")
-    ds_ok = False
-    if DEEPSEEK_API_KEY:
-        ds = get_deepseek_balance()
-        sn_ds = build_deepseek_snapshot(ds)
-        if sn_ds["ok"]:
-            bal = sn_ds["balance"]
-            bal_str = f"{sn_ds['symbol']}{bal:.2f}" if bal is not None else "?"
-            detail = f"{bal_str} [{sn_ds['status']}]"
-            print(_status("balance", True, detail))
-            ds_ok = True
+    # ── Claude (OAuth API, with Claude CLI fallback) ───────────────────────
+    print("Claude:")
+    claude_ok = False
+    claude = get_claude_usage()
+    source = claude.get("source", "")
+    if claude.get("ok"):
+        if source == "oauth":
+            print(_status("auth", True, "OAuth token loaded"))
+        elif source == "cli":
+            print(_status("auth", True, f"{CLAUDE_CLI} /usage"))
         else:
-            print(_status("balance", False, sn_ds["raw_status"]))
+            print(_status("auth", True, "usage source available"))
     else:
-        print(_status("balance", False, "no API key"))
+        detail = claude.get("detail") or claude.get("status", "error")
+        print(_status("auth", False, detail[:160]))
+
+    sn_claude = build_claude_snapshot(claude)
+    if sn_claude["ok"]:
+        pct = sn_claude["short_used_percent"]
+        pct_str = f"{pct}%" if pct is not None else "?"
+        source_str = f" via {source}" if source else ""
+        detail = f"{sn_claude['short_label']} {pct_str} [{sn_claude['status']}]{source_str}"
+        print(_status("usage", True, detail))
+        claude_ok = True
+    else:
+        print(_status("usage", False, sn_claude["raw_status"]))
 
     print()
 
     # ── Render ─────────────────────────────────────────────────────────────
     print("Render:")
     render_ok = False
-    if codex_ok or ds_ok:
+    if codex_ok or claude_ok:
         try:
             snapshot = {
                 "codex": build_codex_snapshot(get_codex_usage() if codex_ok else {"ok": False, "status": "n/a"}),
-                "deepseek": build_deepseek_snapshot(get_deepseek_balance() if ds_ok else {"ok": False, "status": "n/a"}),
+                "claude": build_claude_snapshot(get_claude_usage() if claude_ok else {"ok": False, "status": "n/a"}),
                 "updated_at": datetime.now().strftime("%H:%M"),
             }
             png = render_image(snapshot)
@@ -630,7 +874,7 @@ def check() -> int:
 
     if not codex_ok:
         warnings += 1
-    if not ds_ok:
+    if not claude_ok:
         warnings += 1
 
     if failures == 0 and warnings == 0:
@@ -638,7 +882,7 @@ def check() -> int:
         return 0
     elif failures == 0 and warnings > 0:
         print(f"  WARNING ({warnings} non-critical issue(s))")
-        if not codex_ok and not ds_ok:
+        if not codex_ok and not claude_ok:
             return 1
         return 0
     else:

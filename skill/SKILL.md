@@ -1,13 +1,13 @@
 ---
 name: quote0-burnout
-description: Build and maintain Quote/0 e-ink dashboards — Codex + DeepSeek usage on 296×152 B&W display.
+description: Build and maintain Quote/0 e-ink dashboards — Codex + Claude usage on 296×152 B&W display.
 version: 1.0.0
 author: Ajax
 license: MIT
 platforms: [macos, linux]
 metadata:
   hermes:
-    tags: [quote0, e-ink, dashboard, codex, deepseek, pillow]
+    tags: [quote0, e-ink, dashboard, codex, claude, pillow]
     related_skills: [e-ink-rendering]
 ---
 
@@ -36,7 +36,7 @@ config.example.env
 
 1. `display.py` → `_load_codex_token()` reads `~/.codex/auth.json`
 2. `GET https://chatgpt.com/backend-api/wham/usage` → `rate_limit.primary_window`, `secondary_window`
-3. DeepSeek: `GET https://api.deepseek.com/user/balance`
+3. Claude: `GET https://api.anthropic.com/api/oauth/usage`
 4. `build_snapshot()` → structured dict
 5. `render.py::render_image()` → Pillow → pure B&W PNG
 6. `push_image()` → Quote/0 Image API
@@ -66,6 +66,31 @@ Response shape:
 - `reset_at` → unix timestamp (int)
 - Labels hardcoded: primary → "5h", secondary → "Week"
 
+## Claude Data (Claude Code OAuth API)
+
+Token from `~/.claude/.credentials.json` or `CLAUDE_ACCESS_TOKEN` env var.
+If OAuth credentials are unavailable, `display.py` falls back to `claude /usage`
+and parses the current session/week rows.
+
+```python
+GET https://api.anthropic.com/api/oauth/usage
+Authorization: Bearer <token>
+anthropic-beta: oauth-2025-04-20
+User-Agent: claude-code/<version>
+```
+
+Response shape:
+```python
+{
+    "five_hour": {"utilization": 42, "resets_at": "2026-07-02T12:00:00Z"},
+    "seven_day": {"utilization": 61, "resets_at": "2026-07-05T12:00:00Z"},
+}
+```
+
+- `utilization` → percent used
+- `resets_at` → ISO timestamp
+- Labels hardcoded: `five_hour` → "5h", `seven_day` → "Week"
+
 ## Snapshot Format
 
 ```python
@@ -80,19 +105,21 @@ snapshot = {
         "long_reset": "5d22h",
         "status": "warn",
     },
-    "deepseek": {
+    "claude": {
         "ok": True,
-        "balance": 92.64,
-        "currency": "USD",
-        "symbol": "$",
+        "short_label": "5h",
+        "short_used_percent": 42,
+        "short_reset": "2h13m",
+        "long_label": "Week",
+        "long_used_percent": 61,
+        "long_reset": "3d4h",
         "status": "ok",
     },
     "updated_at": "16:40",
 }
 ```
 
-Status rules: Codex `<70%` ok, `70-89%` warn, `≥90%` hot.
-DeepSeek: `≥10` ok, `3-10` warn, `<3` hot.
+Status rules: Codex/Claude `<70%` ok, `70-89%` warn, `≥90%` hot.
 
 ## E-Ink Rendering
 
@@ -100,9 +127,10 @@ See `references/eink-design.md` for full layout, font stack, and spacing.
 
 Key points:
 - 296×152 pure B&W. `Image.new("L", …).convert("1", dither=NONE)`
-- **Fonts**: PixelOperator 16px (labels/text), VCR OSD Mono 21px (DeepSeek balance), Minecraftia 8px (timestamp)
-- **Logos**: 16×16 pixel art in `assets/logos/`
-- **Dual-row Codex**: label + inline bar(dots) + remaining% + reset
+- **Fonts**: PixelOperator 16px (section labels and row labels), Minecraftia 8px (timestamp and usage notes)
+- **Logos**: 16×16 1-bit PNGs in `assets/logos/`
+- **Matched Codex + Claude panels**: each panel is header 18px + two 18px rows
+- **Shared bar geometry**: all four rows use the same `note_x`, so bar widths align across both panels
 - **Bar**: outline + dot-grid empty area. Filled = REMAINING.
 - **Divider**: 6px dash / 4px gap
 - **Time format**: ≥24h → `XdXXh`
@@ -147,7 +175,7 @@ python display.py --debug-json
 ## Common Pitfalls
 
 1. **Bar shows used instead of remaining.** Text and bar MUST both reflect remaining (100 - used_pct).
-2. **Equal bar widths.** Pre-compute max note width and pass consistent `note_x` to both rows.
+2. **Equal bar widths.** Pre-compute max note width across all visible rows and pass consistent `note_x` to both panels.
 3. **Pixel font spacing.** Use `textbbox()` after every font change — pixel fonts have very different metrics from system fonts.
 4. **Quote/0 404 "未找到图像 API 内容".** Delete and re-add the IMAGE_API card in Dot. App Content Studio.
 5. **Device shows stale content.** Set `refreshNow=true` or wait for next content cycle.
@@ -158,5 +186,5 @@ python display.py --debug-json
 - [ ] `python display.py --preview` renders clean 296×152 PNG
 - [ ] Progress bars equal width, both show REMAINING
 - [ ] No text overlap or clipping (verify with `textbbox()`)
-- [ ] DeepSeek balance in VCR 21px, bottom-aligned with status badge
+- [ ] Codex and Claude panels use matching 5h/Week row geometry with no clipping
 - [ ] Push succeeds: `python display.py`
