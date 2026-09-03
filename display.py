@@ -168,9 +168,12 @@ def build_snapshot(layout: str | None = None) -> dict:
             cached["deepseek"] = snap["deepseek"]
             cached["opencode"] = snap["opencode"]
             cached["second_panel"] = snap["second_panel"]
-            # old cache files lack these keys — keep the grid alive after upgrade
-            cached.setdefault("layout", snap["layout"])
-            cached.setdefault("configured", snap["configured"])
+            # Always refresh layout metadata from the live run: a stale
+            # cached copy would otherwise fight an changed --layout/LAYOUT
+            # override or provider-credentials change until Codex recovers.
+            # (Assignment also recreates keys missing from pre-upgrade caches.)
+            cached["layout"] = snap["layout"]
+            cached["configured"] = snap["configured"]
             return cached
     except (OSError, ValueError):
         pass
