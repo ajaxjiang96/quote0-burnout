@@ -358,6 +358,17 @@ def _logo_paste(img, logo_img, x, y):
                 img.putpixel((x + dx, y + dy), BLACK)
 
 
+_q_font_cache = None
+
+
+def _qfont() -> ImageFont.FreeTypeFont:
+    """12px PixelOperator — quarter-cell content face (readability pass)."""
+    global _q_font_cache
+    if _q_font_cache is None:
+        _q_font_cache = ImageFont.truetype(str(OP_FONT), 12)
+    return _q_font_cache
+
+
 def _clip_text(draw, text, font, max_w):
     """Truncate text to fit max_w; no ellipsis (pixel fonts lack the glyph)."""
     if _tsize(draw, text, font)[0] <= max_w:
@@ -407,21 +418,24 @@ def _draw_seams(draw, layout):
         _hdash(draw, y, 0, W)
 
 
+def _live_providers(snapshot) -> list[str]:
+    """Providers whose last fetch succeeded (ok=True) — dead providers
+    (no auth, timeouts) are hidden, not shown as error cells."""
+    return [k for k in _PROVIDER_ORDER if snapshot.get(k, {}).get("ok")]
+
+
 def _resolve_auto(snapshot) -> str:
-    configured = snapshot.get("configured")
-    if configured is None:  # absent key → infer from live snapshots (hand-built dicts)
-        configured = [k for k in _PROVIDER_ORDER if snapshot.get(k, {}).get("ok")]
-    n = len(configured)
+    n = len(_live_providers(snapshot))
     return {0: "stack", 1: "stack", 2: "1+1", 3: "1+2"}.get(n, "2+2")
 
 
-def _select_panels(snapshot, configured, n) -> list[str]:
+def _select_panels(snapshot, live, n) -> list[str]:
     """Pick n providers: primaries (codex, claude) first, then secondaries
     (deepseek, opencode). When only one secondary slot is left, the
     second_panel preference arbitrates; a compatible auto layout never
     needs arbitration because slots fit the secondaries' count."""
-    primaries = [p for p in ("codex", "claude") if p in configured]
-    secondaries = [p for p in ("deepseek", "opencode") if p in configured]
+    primaries = [p for p in ("codex", "claude") if p in live]
+    secondaries = [p for p in ("deepseek", "opencode") if p in live]
     chosen = list(primaries[:n])
     room = n - len(chosen)
     if room >= len(secondaries):
@@ -444,10 +458,7 @@ def _plan_layout(snapshot) -> tuple[str, list]:
     if raw not in LAYOUTS:
         return "stack", []
     cells = LAYOUTS[raw]
-    configured = snapshot.get("configured")
-    if configured is None:
-        configured = [k for k in _PROVIDER_ORDER if snapshot.get(k, {}).get("ok")]
-    jobs = list(zip(_select_panels(snapshot, configured, len(cells)), cells))
+    jobs = list(zip(_select_panels(snapshot, _live_providers(snapshot), len(cells)), cells))
     return raw, jobs
 
 
@@ -459,33 +470,31 @@ def _cell_note_x(draw, rows, small):
     return W - PAD - max(notes) if notes else None
 
 
-def _q_title(draw, name, cell, ts):
-    """Quarter-cell header: 8px uppercase title left, timestamp right."""
-    small = _pixel()
+def _q_title(draw, name, cell):
+    """Quarter-cell header: 8px uppercase title."""
     draw.text((cell.x0 + CELL_PAD, cell.y0 + 4), _TITLE_BY_NAME.get(name, name.upper()),
-              font=small, fill=BLACK)
-    if ts:
-        tsw, _ = _tsize(draw, ts, small)
-        draw.text((cell.x0 + cell.w - CELL_PAD - tsw, cell.y0 + 4), ts, font=small, fill=BLACK)
+              font=_pixel(), fill=BLACK)
 
 
 def _q_lines(draw, cell, rows):
-    """Two 8px content lines from (label, used, reset) rows — remaining%."""
-    small = _pixel()
-    y = cell.y0 + 24
+    """Two content lines from (label, used, reset) rows — remaining%,
+    at 12px PixelOperator (readability pass: quarters had room for a
+    larger face)."""
+    qfont = _qfont()
+    y = cell.y0 + 22
     for lbl, used, reset in rows[:2]:
         line = f"{lbl} {100 - used:.0f}% {reset}" if used is not None else f"{lbl} ?"
-        line = _clip_text(draw, line, small, cell.w - 2 * CELL_PAD)
-        draw.text((cell.x0 + CELL_PAD, y), line, font=small, fill=BLACK)
-        y += 14
+        line = _clip_text(draw, line, qfont, cell.w - 2 * CELL_PAD)
+        draw.text((cell.x0 + CELL_PAD, y), line, font=qfont, fill=BLACK)
+        y += 18
 
 
-def _draw_cell(img, draw, name, sn, cell, ts):
+def _draw_cell(img, draw, name, sn, cell):
     label = _op()
     small = _pixel()
 
     if cell.kind == "q":
-        _q_title(draw, name, cell, ts)
+        _q_title(draw, name, cell)
         if not sn.get("ok"):
             status = _clip_text(draw, sn.get("raw_status", "error"), small, cell.w - 2 * CELL_PAD)
             draw.text((cell.x0 + CELL_PAD, cell.y0 + 24), status, font=small, fill=BLACK)
@@ -502,12 +511,13 @@ def _draw_cell(img, draw, name, sn, cell, ts):
         elif name == "deepseek":
             sym = sn.get("symbol", "$")
             bal = f"{sym}{sn.get('balance', 0):.2f}" if sn.get("balance") is not None else "?"
-            draw.text((cell.x0 + CELL_PAD, cell.y0 + 20), bal, font=label, fill=BLACK)
+            draw.text((cell.x0 + CELL_PAD, cell.y0 + 18), bal, font=label, fill=BLACK)
             win = sn.get("window")
             if win:
                 extra = f" {sn.get('countdown', '')}" if sn.get("countdown") else ""
                 badge = f"{win} {sym}{sn.get('price_in', 0):.2f}{extra}"
-                draw.text((cell.x0 + CELL_PAD, cell.y0 + 46), badge, font=small, fill=BLACK)
+                badge = _clip_text(draw, badge, _qfont(), cell.w - 2 * CELL_PAD)
+                draw.text((cell.x0 + CELL_PAD, cell.y0 + 42), badge, font=_qfont(), fill=BLACK)
         return
 
     # ── half tier ─────────────────────────────────────────────────────────
@@ -516,9 +526,6 @@ def _draw_cell(img, draw, name, sn, cell, ts):
     if logo is not None:
         _logo_paste(img, logo, cell.x0 + PAD, y_top)
     draw.text((LABEL_X, y_top), _TITLE_BY_NAME.get(name, name.upper()), font=label, fill=BLACK)
-    if ts:
-        tsw, _ = _tsize(draw, ts, small)
-        draw.text((cell.x0 + cell.w - PAD - tsw, y_top), ts, font=small, fill=BLACK)
 
     if not sn.get("ok"):
         status = _clip_text(draw, sn.get("raw_status", "error"), small, cell.w - 2 * PAD - LABEL_X)
@@ -568,10 +575,13 @@ def _render_grid(img: Image.Image, draw: ImageDraw.ImageDraw, snap: dict, layout
         _render_v5(img, draw, snap)
         return
     _draw_seams(draw, mode)
-    ts_fb = snap.get("updated_at", "")
+    # One global refresh time, top-right — cells don't duplicate it.
+    ts = snap.get("updated_at", "")
+    if ts:
+        tsw, _ = _tsize(draw, ts, _pixel())
+        draw.text((W - PAD - tsw, 4), ts, font=_pixel(), fill=BLACK)
     for name, cell in jobs:
-        sn = snap.get(name, {})
-        _draw_cell(img, draw, name, sn, cell, sn.get("updated_at") or ts_fb)
+        _draw_cell(img, draw, name, snap.get(name, {}), cell)
 
 
 # ── Legacy ────────────────────────────────────────────────────────────────
