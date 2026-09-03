@@ -426,10 +426,10 @@ def build_codex_snapshot(codex: dict) -> dict:
         }
 
     raw = codex.get("raw", {})
-    rate_limit = raw.get("rate_limit", {})
+    rate_limit = raw.get("rate_limit") or {}
 
-    primary = rate_limit.get("primary_window", {})
-    secondary = rate_limit.get("secondary_window", {})
+    primary = rate_limit.get("primary_window") or {}
+    secondary = rate_limit.get("secondary_window") or {}
 
     short_pct = primary.get("used_percent")
     short_reset_ts = primary.get("reset_at")
@@ -447,15 +447,29 @@ def build_codex_snapshot(codex: dict) -> dict:
     except (ValueError, TypeError):
         long_pct = None
 
+    has_secondary = long_pct is not None
+    short_label = "5h"  # default
+
+    # Label: derive from window seconds if secondary is missing
+    if not has_secondary:
+        secs = primary.get("limit_window_seconds")
+        if secs and secs >= 86400:
+            short_label = "Week"
+        elif secs and secs >= 3600:
+            hours = secs // 3600
+            short_label = f"{hours}h"
+        else:
+            short_label = "Now"
+
     return {
         "ok": True,
-        "short_label": "5h",
+        "short_label": short_label,
         "short_used_percent": short_pct,
         "short_reset": _time_until(short_reset_ts) if short_reset_ts else "?",
-        "long_label": "Week",
-        "long_used_percent": long_pct,
-        "long_reset": _time_until(long_reset_ts) if long_reset_ts else "?",
-        "status": _pct_status(short_pct),
+        "long_label": "Week" if has_secondary else None,
+        "long_used_percent": long_pct if has_secondary else None,
+        "long_reset": _time_until(long_reset_ts) if long_reset_ts and has_secondary else None,
+        "status": _pct_status(short_pct if short_pct is not None else long_pct),
         "raw_status": "",
     }
 
