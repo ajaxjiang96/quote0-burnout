@@ -28,7 +28,7 @@ from render import render_image
 
 # Provider implementations live in providers/; display.py stays the shell
 # (CLI, push, cache, orchestration, second-panel resolution).
-from providers import claude, codex, configured_providers, deepseek, opencode
+from providers import claude, codex, deepseek, opencode
 from providers.core import (CURRENCY_SYMBOLS, coerce_percent as _coerce_percent,
                             env as _env, pct_status as _pct_status,
                             time_until as _time_until, window_label as _window_label)
@@ -46,18 +46,6 @@ QUOTE0_REFRESH_NOW = _env("QUOTE0_REFRESH_NOW", "false").lower() == "true"
 
 # Second panel: auto (prefer opencode-go, fall back to deepseek) | deepseek | opencode
 SECOND_PANEL = _env("SECOND_PANEL", "auto").strip().lower()
-
-# Layout: auto (fit to configured providers) | stack | 1+1 | 1+2 | 2+2
-LAYOUT_ENV = _env("LAYOUT", "auto").strip().lower()
-
-
-def _normalize_layout(raw: str) -> str:
-    """Validate a layout string; unknown values warn and fall back to auto."""
-    raw = (raw or "auto").strip().lower()
-    if raw in ("auto", "stack", "1+1", "1+2", "2+2"):
-        return raw
-    print(f"warning: unknown layout '{raw}', using auto", file=sys.stderr)
-    return "auto"
 
 QUOTE0_IMAGE_TASK_KEY = _env("QUOTE0_IMAGE_TASK_KEY")
 QUOTE0_TEXT_TASK_KEY  = _env("QUOTE0_TEXT_TASK_KEY")
@@ -114,21 +102,14 @@ def _resolve_second_panel(deepseek_sn: dict, opencode_sn: dict) -> str:
 
 # ── Snapshot builder (v0.4) ────────────────────────────────────────────────────
 
-def build_snapshot(layout: str | None = None) -> dict:
+def build_snapshot() -> dict:
     """Fetch and build full snapshot, falling back to cache on failure.
 
     On success the snapshot JSON is cached at SNAPSHOT_CACHE_PATH. If the
     Codex API is unreachable the last cached codex snapshot is served,
-    marked `` (cached)`` in updated_at, with freshly-fetched claude/deepseek/
-    opencode panels overlaid. Cache writes are best-effort.
-
-    layout: None → LAYOUT env (default auto). The snapshot carries the
-    resolved layout, the configured-provider list, and a per-provider
-    updated_at stamp (%H:%M) that the grid engine renders in cell corners.
+    marked `` (cached)`` in updated_at, with freshly-fetched claude and
+    deepseek panels overlaid. Cache writes are best-effort.
     """
-    layout = layout if layout is not None else _normalize_layout(LAYOUT_ENV)
-    now = datetime.now().strftime("%H:%M")
-
     codex = get_codex_usage()
     claude = get_claude_usage()
     deepseek = get_deepseek_balance()
@@ -137,17 +118,13 @@ def build_snapshot(layout: str | None = None) -> dict:
     claude_sn = build_claude_snapshot(claude)
     deepseek_sn = build_deepseek_snapshot(deepseek)
     opencode_sn = build_opencode_snapshot(opencode)
-    for p_sn in (codex_sn, claude_sn, deepseek_sn, opencode_sn):
-        p_sn["updated_at"] = now
     snap = {
         "codex": codex_sn,
         "claude": claude_sn,
         "deepseek": deepseek_sn,
         "opencode": opencode_sn,
         "second_panel": _resolve_second_panel(deepseek_sn, opencode_sn),
-        "layout": layout,
-        "configured": configured_providers(),
-        "updated_at": now,
+        "updated_at": datetime.now().strftime("%H:%M"),
         "_cached": False,
     }
     if codex.get("ok"):
@@ -168,9 +145,6 @@ def build_snapshot(layout: str | None = None) -> dict:
             cached["deepseek"] = snap["deepseek"]
             cached["opencode"] = snap["opencode"]
             cached["second_panel"] = snap["second_panel"]
-            # old cache files lack these keys — keep the grid alive after upgrade
-            cached.setdefault("layout", snap["layout"])
-            cached.setdefault("configured", snap["configured"])
             return cached
     except (OSError, ValueError):
         pass
@@ -265,9 +239,8 @@ def push_text(payload: dict) -> dict:
 
 # ── Run (push) ────────────────────────────────────────────────────────────────
 
-def run(preview: bool = False, text_mode: bool = False, layout: str | None = None):
-    snapshot = build_snapshot(layout=layout)
-    print(f"layout: {snapshot.get('layout', 'stack')}")
+def run(preview: bool = False, text_mode: bool = False):
+    snapshot = build_snapshot()
 
     if text_mode:
         cx_text = format_codex_text(snapshot["codex"])
@@ -602,11 +575,6 @@ def main():
         "--list-tasks", nargs="?", const="", metavar="TYPE",
         help="List task slots: no arg = fixed+loop, 'fixed', 'loop'"
     )
-    parser.add_argument(
-        "--layout", default=None,
-        choices=["auto", "stack", "1+1", "1+2", "2+2"],
-        help="Panel layout: auto (fit to configured providers) | stack (default) | 1+1 | 1+2 | 2+2. Overrides LAYOUT env."
-    )
     args = parser.parse_args()
 
     # ── --check ────────────────────────────────────────────────────────────
@@ -625,7 +593,7 @@ def main():
         sys.exit(0 if ok else 1)
 
     # ── default / --preview / --text ───────────────────────────────────────
-    success = run(preview=args.preview, text_mode=args.text, layout=args.layout)
+    success = run(preview=args.preview, text_mode=args.text)
     sys.exit(0 if success else 1)
 
 

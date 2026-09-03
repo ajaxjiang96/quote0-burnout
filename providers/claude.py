@@ -361,17 +361,3 @@ def format_claude_text(sn: dict) -> str:
 get_usage = get_claude_usage
 build_snapshot = build_claude_snapshot
 format_text = format_claude_text
-
-
-def is_configured() -> bool:
-    """True when claude credentials are available (env or ~/.claude/.credentials.json).
-
-    Deliberately skips the macOS Keychain probe — it is slow and has side
-    effects; keychain-only setups count as unconfigured (same classification
-    as #21's hide-unauthenticated behavior).
-    """
-    return bool(
-        os.environ.get("CLAUDE_ACCESS_TOKEN", "").strip()
-        or os.environ.get("CODEXBAR_CLAUDE_OAUTH_TOKEN", "").strip()
-        or CLAUDE_AUTH_PATH.exists()
-    )

@@ -1,6 +1,5 @@
 """Snapshot-builder unit tests for all providers (pure functions, no network)."""
 
-import os
 import unittest
 from datetime import datetime, timezone
 
@@ -172,63 +171,3 @@ class SecondPanelResolutionTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-
-
-class ProviderConfiguredTests(unittest.TestCase):
-    """is_configured() predicates — pure, no network (mock the credential files)."""
-
-    def _no_env(self, *keys):
-        for k in keys:
-            os.environ.pop(k, None)
-
-    def test_codex_env_and_file(self):
-        from pathlib import Path as _P
-        import providers.codex as cx
-        from unittest.mock import patch
-
-        with patch("providers.codex.CODEX_AUTH_PATH", _P("/nonexistent/xyz")):
-            with patch.dict(os.environ, {}, clear=False):
-                self._no_env("CODEX_ACCESS_TOKEN")
-                self.assertFalse(cx.is_configured())
-        with patch.dict(os.environ, {"CODEX_ACCESS_TOKEN": "tok"}):
-            self.assertTrue(cx.is_configured())
-        # file-based (no env) counts as configured
-        self.assertEqual(cx.is_configured(), _P.home().joinpath(".codex/auth.json").exists())
-
-    def test_claude_env_and_file(self):
-        import providers.claude as cl
-        from pathlib import Path as _P
-        from unittest.mock import patch
-
-        with patch("providers.claude.CLAUDE_AUTH_PATH", _P("/nonexistent/xyz")):
-            with patch.dict(os.environ, {}, clear=False):
-                self._no_env("CLAUDE_ACCESS_TOKEN", "CODEXBAR_CLAUDE_OAUTH_TOKEN")
-                self.assertFalse(cl.is_configured())
-        with patch.dict(os.environ, {"CLAUDE_ACCESS_TOKEN": "tok"}):
-            self.assertTrue(cl.is_configured())
-        with patch.dict(os.environ, {"CODEXBAR_CLAUDE_OAUTH_TOKEN": "tok"}):
-            self.assertTrue(cl.is_configured())
-
-    def test_deepseek_opencode_env(self):
-        import providers.deepseek as ds
-        import providers.opencode as oc
-        from unittest.mock import patch
-
-        with patch("providers.deepseek.DEEPSEEK_API_KEY", ""):
-            self.assertFalse(ds.is_configured())
-        with patch("providers.deepseek.DEEPSEEK_API_KEY", "sk-1"):
-            self.assertTrue(ds.is_configured())
-        with patch("providers.opencode.OPENCODE_GO_API_KEY", ""):
-            self.assertFalse(oc.is_configured())
-        with patch("providers.opencode.OPENCODE_GO_API_KEY", "oc-1"):
-            self.assertTrue(oc.is_configured())
-
-    def test_registry_order_and_filtering(self):
-        import providers
-        from unittest.mock import patch
-
-        with patch("providers.codex.is_configured", return_value=True), \
-             patch("providers.claude.is_configured", return_value=False), \
-             patch("providers.deepseek.is_configured", return_value=True), \
-             patch("providers.opencode.is_configured", return_value=True):
-            self.assertEqual(providers.configured_providers(), ["codex", "deepseek", "opencode"])

@@ -226,7 +226,3 @@ def format_deepseek_text(sn: dict) -> str:
 get_balance = get_deepseek_balance
 build_snapshot = build_deepseek_snapshot
 format_text = format_deepseek_text
-
-
-def is_configured() -> bool:
-    return bool(DEEPSEEK_API_KEY)

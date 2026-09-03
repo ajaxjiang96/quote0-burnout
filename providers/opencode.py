@@ -105,7 +105,3 @@ def format_opencode_text(sn: dict) -> str:
 get_usage = get_opencode_usage
 build_snapshot = build_opencode_snapshot
 format_text = format_opencode_text
-
-
-def is_configured() -> bool:
-    return bool(OPENCODE_GO_API_KEY)
