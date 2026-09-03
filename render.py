@@ -19,6 +19,7 @@ PAD = 10
 FONT_PATH = "/System/Library/Fonts/Menlo.ttc"
 PIXEL_FONT = Path(__file__).parent / "assets" / "fonts" / "Minecraftia-Regular.ttf"
 OP_FONT    = Path(__file__).parent / "assets" / "fonts" / "PixelOperator.ttf"
+VCR_FONT   = Path(__file__).parent / "assets" / "fonts" / "VCR_OSD_MONO_1.001.ttf"
 LOGO_CODEX    = Image.open(Path(__file__).parent / "assets" / "logos" / "codex.png").convert("1")
 LOGO_CLAUDE   = Image.open(Path(__file__).parent / "assets" / "logos" / "claude.png").convert("1")
 LOGO_DEEPSEEK = Image.open(Path(__file__).parent / "assets" / "logos" / "deepseek.png").convert("1")
@@ -50,6 +51,17 @@ def _op() -> ImageFont.FreeTypeFont:
     if _op_font_cache is None:
         _op_font_cache = ImageFont.truetype(str(OP_FONT), 16)
     return _op_font_cache
+
+_vcr_font_cache = None
+
+
+def _vcr() -> ImageFont.FreeTypeFont:
+    """VCR OSD Mono at its native 21px — the original DeepSeek balance face.
+    A larger primary value than PixelOperator 16, still pixel-perfect."""
+    global _vcr_font_cache
+    if _vcr_font_cache is None:
+        _vcr_font_cache = ImageFont.truetype(str(VCR_FONT), 21)
+    return _vcr_font_cache
 
 def _tsize(draw: ImageDraw.ImageDraw, text: str, font: ImageFont.FreeTypeFont):
     bbox = draw.textbbox((0, 0), text, font=font)
@@ -358,17 +370,6 @@ def _logo_paste(img, logo_img, x, y):
                 img.putpixel((x + dx, y + dy), BLACK)
 
 
-_q_font_cache = None
-
-
-def _qfont() -> ImageFont.FreeTypeFont:
-    """12px PixelOperator — quarter-cell content face (readability pass)."""
-    global _q_font_cache
-    if _q_font_cache is None:
-        _q_font_cache = ImageFont.truetype(str(OP_FONT), 12)
-    return _q_font_cache
-
-
 def _clip_text(draw, text, font, max_w):
     """Truncate text to fit max_w; no ellipsis (pixel fonts lack the glyph)."""
     if _tsize(draw, text, font)[0] <= max_w:
@@ -470,23 +471,31 @@ def _cell_note_x(draw, rows, small):
     return W - PAD - max(notes) if notes else None
 
 
-def _q_title(draw, name, cell):
-    """Quarter-cell header: 8px uppercase title."""
-    draw.text((cell.x0 + CELL_PAD, cell.y0 + 4), _TITLE_BY_NAME.get(name, name.upper()),
-              font=_pixel(), fill=BLACK)
+def _q_title(img, draw, name, cell):
+    """Quarter-cell header: 16px logo + 16px PixelOperator title — identical
+    faces AND geometry (PAD / LABEL_X) to the half cards so all panels
+    share one left edge."""
+    logo = _LOGO_BY_NAME.get(name)
+    if logo is not None:
+        _logo_paste(img, logo, cell.x0 + PAD, cell.y0 + 2)
+    draw.text((cell.x0 + LABEL_X, cell.y0 + 2),
+              _TITLE_BY_NAME.get(name, name.upper()), font=_op(), fill=BLACK)
 
 
 def _q_lines(draw, cell, rows):
-    """Two content lines from (label, used, reset) rows — remaining%,
-    at 12px PixelOperator (readability pass: quarters had room for a
-    larger face)."""
-    qfont = _qfont()
-    y = cell.y0 + 22
+    """Two content lines from (label, used, reset) rows — remaining%.
+
+    Face: PixelOperator at its NATIVE 16px (pixel grid — scaling a pixel
+    font breaks glyphs, e.g. the '.'; see the 12px regressions). Same face
+    as half-tier labels; widest string 'Week 59% 123h3m' measured 105px
+    against the 136px content width of a 148px cell."""
+    qfont = _op()
+    y = cell.y0 + 26
     for lbl, used, reset in rows[:2]:
         line = f"{lbl} {100 - used:.0f}% {reset}" if used is not None else f"{lbl} ?"
-        line = _clip_text(draw, line, qfont, cell.w - 2 * CELL_PAD)
-        draw.text((cell.x0 + CELL_PAD, y), line, font=qfont, fill=BLACK)
-        y += 18
+        line = _clip_text(draw, line, qfont, cell.w - 2 * PAD)
+        draw.text((cell.x0 + PAD, y), line, font=qfont, fill=BLACK)
+        y += 24
 
 
 def _draw_cell(img, draw, name, sn, cell):
@@ -494,7 +503,7 @@ def _draw_cell(img, draw, name, sn, cell):
     small = _pixel()
 
     if cell.kind == "q":
-        _q_title(draw, name, cell)
+        _q_title(img, draw, name, cell)
         if not sn.get("ok"):
             status = _clip_text(draw, sn.get("raw_status", "error"), small, cell.w - 2 * CELL_PAD)
             draw.text((cell.x0 + CELL_PAD, cell.y0 + 24), status, font=small, fill=BLACK)
@@ -511,13 +520,15 @@ def _draw_cell(img, draw, name, sn, cell):
         elif name == "deepseek":
             sym = sn.get("symbol", "$")
             bal = f"{sym}{sn.get('balance', 0):.2f}" if sn.get("balance") is not None else "?"
-            draw.text((cell.x0 + CELL_PAD, cell.y0 + 18), bal, font=label, fill=BLACK)
+            # balance = PRIMARY value of the cell: VCR 21px (native face,
+            # same as the pre-#1 stack design), badge below at 16px
+            draw.text((cell.x0 + PAD, cell.y0 + 26), bal, font=_vcr(), fill=BLACK)
             win = sn.get("window")
             if win:
                 extra = f" {sn.get('countdown', '')}" if sn.get("countdown") else ""
                 badge = f"{win} {sym}{sn.get('price_in', 0):.2f}{extra}"
-                badge = _clip_text(draw, badge, _qfont(), cell.w - 2 * CELL_PAD)
-                draw.text((cell.x0 + CELL_PAD, cell.y0 + 42), badge, font=_qfont(), fill=BLACK)
+                badge = _clip_text(draw, badge, label, cell.w - 2 * PAD)
+                draw.text((cell.x0 + PAD, cell.y0 + 48), badge, font=label, fill=BLACK)
         return
 
     # ── half tier ─────────────────────────────────────────────────────────
@@ -535,7 +546,9 @@ def _draw_cell(img, draw, name, sn, cell):
     if name in ("codex", "claude"):
         rows = _window_rows(sn)
         n_x = _cell_note_x(draw, rows, small)
-        row_y = y_top + PANEL_HEADER_H
+        # bottom-anchor the row block: a 1-row panel hangs at the same
+        # seam-adjacent level as a 2-row one (no floating dead space)
+        row_y = max(y_top + PANEL_HEADER_H, cell.y0 + 62 - PANEL_ROW_H * len(rows))
         for row in rows:
             row_y = _draw_usage_row(
                 draw, row_y, row[0], row[1], row[2],
@@ -547,7 +560,7 @@ def _draw_cell(img, draw, name, sn, cell):
             if w.get("used_percent") is not None:
                 rows.append((lbl, w["used_percent"], w.get("reset", "?")))
         n_x = _cell_note_x(draw, rows, small)
-        row_y = y_top + PANEL_HEADER_H
+        row_y = max(y_top + PANEL_HEADER_H, cell.y0 + 62 - PANEL_ROW_H * len(rows))
         for row in rows:
             row_y = _draw_usage_row(
                 draw, row_y, row[0], row[1], row[2],
