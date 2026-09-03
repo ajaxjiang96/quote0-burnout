@@ -178,12 +178,10 @@ def _render_v5(img: Image.Image, draw: ImageDraw.ImageDraw, snap: dict):
 
         if sn.get("ok"):
             rows = _window_rows(sn)
-            row_y = _draw_usage_row(
-                draw, row_y, rows[0][0], rows[0][1], rows[0][2],
-                small, label, note_x, row_h=PANEL_ROW_H, bar_h=BAR_H)
-            _draw_usage_row(
-                draw, row_y, rows[1][0], rows[1][1], rows[1][2],
-                small, label, note_x, row_h=PANEL_ROW_H, bar_h=BAR_H)
+            for row in rows:
+                row_y = _draw_usage_row(
+                    draw, row_y, row[0], row[1], row[2],
+                    small, label, note_x, row_h=PANEL_ROW_H, bar_h=BAR_H)
         else:
             status = sn.get("raw_status", "error")
             draw.text((LABEL_X, row_y), status, font=label, fill=BLACK)
