@@ -20,6 +20,7 @@ PIXEL_FONT = Path(__file__).parent / "assets" / "fonts" / "Minecraftia-Regular.t
 OP_FONT    = Path(__file__).parent / "assets" / "fonts" / "PixelOperator.ttf"
 LOGO_CODEX    = Image.open(Path(__file__).parent / "assets" / "logos" / "codex.png").convert("1")
 LOGO_CLAUDE   = Image.open(Path(__file__).parent / "assets" / "logos" / "claude.png").convert("1")
+LOGO_DEEPSEEK = Image.open(Path(__file__).parent / "assets" / "logos" / "deepseek.png").convert("1")
 LOGO_W = 16
 LOGO_GAP = 4
 LABEL_X = PAD + LOGO_W + LOGO_GAP  # text starts after logo + gap
@@ -74,13 +75,22 @@ def _bar_dots(draw, x, y, w, h, used_pct):
 
 
 PANEL_Y = 12
-PANEL_HEADER_H = 18
-PANEL_ROW_H = 18
+PANEL_HEADER_H = 16
+PANEL_ROW_H = 16
 PANEL_H = PANEL_HEADER_H + PANEL_ROW_H * 2
-DIVIDER_GAP_TOP = 8
-DIVIDER_GAP_BOTTOM = 10
+DIVIDER_GAP_TOP = 5
+DIVIDER_GAP_BOTTOM = 7
 BAR_H = 10
 LABEL_W = 36
+
+
+def _divider(draw, y, dash_len=6, gap_len=4):
+    """Zellux-style dashed divider: 6px dash / 4px gap."""
+    x = 0
+    while x < W:
+        draw.line([(x, y), (min(x + dash_len - 1, W), y)], fill=BLACK, width=1)
+        x += dash_len + gap_len
+    return y + 1
 
 
 def _draw_usage_row(
@@ -197,15 +207,41 @@ def _render_v5(img: Image.Image, draw: ImageDraw.ImageDraw, snap: dict):
 
     # ── Divider (zellux-style: 6px dash / 4px gap) ─────────────────────
     y += DIVIDER_GAP_TOP
-    dash_len, gap_len = 6, 4
-    x = 0
-    while x < W:
-        draw.line([(x, y), (min(x + dash_len - 1, W), y)], fill=BLACK, width=1)
-        x += dash_len + gap_len
+    y = _divider(draw, y)
     y += DIVIDER_GAP_BOTTOM
 
     # ── CLAUDE ──────────────────────────────────────────────────────────
-    _draw_panel(y, LOGO_CLAUDE, "CLAUDE", cl, note_x)
+    y = _draw_panel(y, LOGO_CLAUDE, "CLAUDE", cl, note_x)
+
+    # ── DEEPSEEK (compact one-row: balance + billing-window badge) ─────
+    ds = snap.get("deepseek", {})
+    y += DIVIDER_GAP_TOP
+    y = _divider(draw, y)
+    y += DIVIDER_GAP_BOTTOM
+    _logo(LOGO_DEEPSEEK, y)
+    draw.text((LABEL_X, y), "DEEPSEEK", font=label, fill=BLACK)
+    if ds.get("ok"):
+        bal = ds.get("balance")
+        sym = ds.get("symbol", "$")
+        bal_text = f"{sym}{bal:.2f}" if bal is not None else "?"
+        dw, _ = _tsize(draw, "DEEPSEEK", label)
+        draw.text((LABEL_X + dw + 6, y), bal_text, font=label, fill=BLACK)
+        _, bh = _tsize(draw, bal_text, label)
+
+        win = ds.get("window")
+        p_in = ds.get("price_in")
+        if win and p_in is not None:
+            badge = f"{win} {sym}{p_in:.2f}"
+            cd = ds.get("countdown")
+            if cd:
+                badge += f" {cd}"
+        else:
+            badge = ds.get("status", "ok").upper()
+        sw, sh = _tsize(draw, badge, small)
+        draw.text((W - PAD - sw, y + (bh - sh) // 2), badge, font=small, fill=BLACK)
+    else:
+        status = ds.get("raw_status", "error")
+        draw.text((LABEL_X + 96, y), status, font=label, fill=BLACK)
 
 
 # ── Legacy ────────────────────────────────────────────────────────────────
@@ -255,6 +291,12 @@ if __name__ == "__main__":
                    "short_reset": "2h13m", "long_label": "Week",
                    "long_used_percent": 61, "long_reset": "3d4h",
                    "status": "ok"},
+        "deepseek": {"ok": True, "balance": 18.42, "currency": "USD",
+                     "symbol": "$", "status": "ok",
+                     "model": "deepseek-v4-flash", "window": "OFF",
+                     "factor": 0.5, "price_in": 0.22, "price_out": 0.66,
+                     "ends_in": 6600, "countdown": "1h50m",
+                     "next_window": "PEAK"},
         "updated_at": "16:40",
     }
     png = render_image(snap)
