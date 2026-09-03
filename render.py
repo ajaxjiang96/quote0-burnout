@@ -408,9 +408,9 @@ def _draw_seams(draw, layout):
 
 
 def _resolve_auto(snapshot) -> str:
-    configured = snapshot.get("configured") or [
-        k for k in _PROVIDER_ORDER if snapshot.get(k, {}).get("ok")
-    ]
+    configured = snapshot.get("configured")
+    if configured is None:  # absent key → infer from live snapshots (hand-built dicts)
+        configured = [k for k in _PROVIDER_ORDER if snapshot.get(k, {}).get("ok")]
     n = len(configured)
     return {0: "stack", 1: "stack", 2: "1+1", 3: "1+2"}.get(n, "2+2")
 
