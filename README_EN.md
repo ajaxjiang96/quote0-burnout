@@ -18,9 +18,12 @@ Week [████████████░░░░░░] 69%  5d23h
 ◆ CLAUDE
 5h  [████████████░░░░░] 42%  2h13m
 Week [████████░░░░░░░░] 61%  3d4h
+─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─
+◆ DEEPSEEK   $18.42        OFF $0.22 1h50m
 ```
 
 - **Codex / Claude**: matched-size dual-row panels (5h / Week) with inline dot-grid bars. Shows remaining% + reset countdown.
+- **DeepSeek**: compact one-line panel — balance + current peak/off-peak billing tier (PEAK/OFF) with countdown to the next tier switch. Official rate card (2026-08); off-peak = 50% of peak.
 - **Icons**: Codex and Claude both use 16×16 monochrome PNGs; Claude is an e-ink binary version of the Claude symbol.
 - **Fonts**: PixelOperator 16px / Minecraftia 8px.
 - Codex data via direct OAuth API — **no CLI dependency**.
