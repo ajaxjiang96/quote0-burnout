@@ -188,6 +188,65 @@ def _render_v5(img: Image.Image, draw: ImageDraw.ImageDraw, snap: dict):
 
         return y + PANEL_H
 
+    def _draw_windows3_panel(y, logo_img, title, sn):
+        """OpenCode Go full tier: header + 5h/Wk/Mo rows with equal-width bars."""
+        _logo(logo_img, y)
+        draw.text((LABEL_X, y), title, font=label, fill=BLACK)
+        rows = []
+        for lbl, key in (("5h", "rolling"), ("Wk", "weekly"), ("Mo", "monthly")):
+            w = sn.get(key) or {}
+            if w.get("used_percent") is not None:
+                rows.append((lbl, w["used_percent"], w.get("reset", "?")))
+        note_w = []
+        for _, used, reset in rows:
+            _, nw = _usage_note(draw, used, reset, small)
+            note_w.append(nw)
+        n_x = W - PAD - max(note_w or [0])
+        row_y = y + PANEL_HEADER_H
+        for row in rows:
+            row_y = _draw_usage_row(
+                draw, row_y, row[0], row[1], row[2],
+                small, label, n_x, row_h=PANEL_ROW_H, bar_h=BAR_H)
+        return y + PANEL_HEADER_H + PANEL_ROW_H * len(rows)
+
+    def _draw_windows3_compact(y, logo_img, title, sn):
+        """OpenCode Go compact tier: title line + note line when crowded."""
+        _logo(logo_img, y)
+        draw.text((LABEL_X, y), title, font=label, fill=BLACK)
+        bits = []
+        for lbl, key in (("5h", "rolling"), ("Wk", "weekly"), ("Mo", "monthly")):
+            w = sn.get(key) or {}
+            if w.get("used_percent") is not None:
+                bits.append(f"{lbl} {w['used_percent']}% {w.get('reset', '?')}")
+        note = "  ".join(bits) or sn.get("status", "error")
+        draw.text((LABEL_X, y + PANEL_HEADER_H), note, font=small, fill=BLACK)
+        _, nh = _tsize(draw, note, small)
+        return y + PANEL_HEADER_H + nh + 3
+
+    def _draw_deepseek_row(y, logo_img, title, sn):
+        """DeepSeek balance tier: balance + peak/off-peak badge on one line."""
+        _logo(logo_img, y)
+        draw.text((LABEL_X, y), title, font=label, fill=BLACK)
+        bal = sn.get("balance")
+        sym = sn.get("symbol", "$")
+        bal_text = f"{sym}{bal:.2f}" if bal is not None else "?"
+        dw, _ = _tsize(draw, title, label)
+        draw.text((LABEL_X + dw + 6, y), bal_text, font=label, fill=BLACK)
+        _, bh = _tsize(draw, bal_text, label)
+
+        win = sn.get("window")
+        p_in = sn.get("price_in")
+        if win and p_in is not None:
+            badge = f"{win} {sym}{p_in:.2f}"
+            cd = sn.get("countdown")
+            if cd:
+                badge += f" {cd}"
+        else:
+            badge = sn.get("status", "ok").upper()
+        sw, sh = _tsize(draw, badge, small)
+        draw.text((W - PAD - sw, y + (bh - sh) // 2), badge, font=small, fill=BLACK)
+        return y + PANEL_HEADER_H
+
     note_widths = []
     for sn in (cx, cl):
         if not sn.get("ok"):
@@ -201,72 +260,51 @@ def _render_v5(img: Image.Image, draw: ImageDraw.ImageDraw, snap: dict):
     tsw, _ = _tsize(draw, ts, small)
     draw.text((W - PAD - tsw, PANEL_Y), ts, font=small, fill=BLACK)
 
-    # ── CODEX ──────────────────────────────────────────────────────────
-    y = _draw_panel(PANEL_Y, LOGO_CODEX, "CODEX", cx, note_x)
-
-    # ── Divider (zellux-style: 6px dash / 4px gap) ─────────────────────
-    y += DIVIDER_GAP_TOP
-    y = _divider(draw, y)
-    y += DIVIDER_GAP_BOTTOM
-
-    # ── CLAUDE ──────────────────────────────────────────────────────────
-    y = _draw_panel(y, LOGO_CLAUDE, "CLAUDE", cl, note_x)
-
-    # ── Second panel (compact one-row; DEEPSEEK or OPENCODE-GO) ────────
+    # ── Panels: only providers with live data; dashed divider between ──
+    cx_ok = cx.get("ok")
+    cl_ok = cl.get("ok")
     ds = snap.get("deepseek", {})
     oc = snap.get("opencode", {})
     second = snap.get("second_panel")
     if second not in ("deepseek", "opencode"):
         second = "deepseek" if ds.get("ok") else ("opencode" if oc.get("ok") else "none")
-    if second == "none":
-        return
-    y += DIVIDER_GAP_TOP
-    y = _divider(draw, y)
-    y += DIVIDER_GAP_BOTTOM
+    if second == "opencode" and not oc.get("ok"):
+        second = "deepseek" if ds.get("ok") else "none"
+    if second == "deepseek" and not ds.get("ok"):
+        second = "opencode" if oc.get("ok") else "none"
 
+    # (title, logo, snapshot, layer) — layer: usage | windows3 | compact | balance
+    panels = []
+    if cx_ok:
+        panels.append(("CODEX", LOGO_CODEX, cx, "usage"))
+    if cl_ok:
+        panels.append(("CLAUDE", LOGO_CLAUDE, cl, "usage"))
     if second == "opencode":
-        _logo(LOGO_OPENCODE, y)
-        draw.text((LABEL_X, y), "OPENCODE-GO", font=label, fill=BLACK)
-        if oc.get("ok"):
-            # All dollar windows: 5h / Wk / Mo ($12 / $30 / $60 limits).
-            bits = []
-            for lbl, key in (("5h", "rolling"), ("Wk", "weekly"), ("Mo", "monthly")):
-                w = oc.get(key) or {}
-                if w.get("used_percent") is not None:
-                    bits.append(f"{lbl} {w['used_percent']}% {w.get('reset', '?')}")
-            note = "  ".join(bits) or oc.get("status", "error")
-            nw, nh = _tsize(draw, note, small)
-            _, lh_ = _tsize(draw, "OPENCODE-GO", label)
-            draw.text((W - PAD - nw, y + (lh_ - nh) // 2), note, font=small, fill=BLACK)
-        else:
-            draw.text((LABEL_X + 110, y), oc.get("raw_status", "error"), font=label, fill=BLACK)
+        layers = ["windows3"] if len(panels) + 1 <= 2 else ["windows3compact"]
+        for layer in layers:
+            panels.append(("OPENCODE-GO", LOGO_OPENCODE, oc, layer))
+    elif second == "deepseek":
+        panels.append(("DEEPSEEK", LOGO_DEEPSEEK, ds, "balance"))
+
+    if not panels:
         return
 
-    # DEEPSEEK: balance + billing-window badge
-    _logo(LOGO_DEEPSEEK, y)
-    draw.text((LABEL_X, y), "DEEPSEEK", font=label, fill=BLACK)
-    if ds.get("ok"):
-        bal = ds.get("balance")
-        sym = ds.get("symbol", "$")
-        bal_text = f"{sym}{bal:.2f}" if bal is not None else "?"
-        dw, _ = _tsize(draw, "DEEPSEEK", label)
-        draw.text((LABEL_X + dw + 6, y), bal_text, font=label, fill=BLACK)
-        _, bh = _tsize(draw, bal_text, label)
-
-        win = ds.get("window")
-        p_in = ds.get("price_in")
-        if win and p_in is not None:
-            badge = f"{win} {sym}{p_in:.2f}"
-            cd = ds.get("countdown")
-            if cd:
-                badge += f" {cd}"
-        else:
-            badge = ds.get("status", "ok").upper()
-        sw, sh = _tsize(draw, badge, small)
-        draw.text((W - PAD - sw, y + (bh - sh) // 2), badge, font=small, fill=BLACK)
-    else:
-        status = ds.get("raw_status", "error")
-        draw.text((LABEL_X + 96, y), status, font=label, fill=BLACK)
+    y = PANEL_Y
+    gap_top = DIVIDER_GAP_TOP if len(panels) <= 2 else 3
+    gap_bot = DIVIDER_GAP_BOTTOM if len(panels) <= 2 else 4
+    for i, (title, logo_img, sn, layer) in enumerate(panels):
+        if i > 0:
+            y += gap_top
+            y = _divider(draw, y)
+            y += gap_bot
+        if layer == "usage":
+            y = _draw_panel(y, logo_img, title, sn, note_x)
+        elif layer == "windows3":
+            y = _draw_windows3_panel(y, logo_img, title, sn)
+        elif layer == "windows3compact":
+            y = _draw_windows3_compact(y, logo_img, title, sn)
+        else:  # balance
+            y = _draw_deepseek_row(y, logo_img, title, sn)
 
 
 # ── Legacy ────────────────────────────────────────────────────────────────
