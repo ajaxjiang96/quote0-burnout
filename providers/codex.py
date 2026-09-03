@@ -171,3 +171,8 @@ def format_codex_text(sn: dict) -> str:
 get_usage = get_codex_usage
 build_snapshot = build_codex_snapshot
 format_text = format_codex_text
+
+
+def is_configured() -> bool:
+    """True when codex credentials are available (env token or ~/.codex/auth.json)."""
+    return bool(os.environ.get("CODEX_ACCESS_TOKEN", "").strip()) or CODEX_AUTH_PATH.exists()
