@@ -572,9 +572,9 @@ def list_tasks(task_type: str = "") -> int:
 
 # ── Debug JSON ────────────────────────────────────────────────────────────────
 
-def debug_json():
+def debug_json(layout: str | None = None):
     """Print snapshot as JSON, no push."""
-    snapshot = build_snapshot()
+    snapshot = build_snapshot(layout=layout)
     print(json.dumps(snapshot, ensure_ascii=False, indent=2))
     return True
 
@@ -608,7 +608,7 @@ def main():
     parser.add_argument(
         "--layout", default=None,
         choices=["auto", "stack", "1+1", "1+2", "2+2"],
-        help="Panel layout: auto (fit to configured providers) | stack (default) | 1+1 | 1+2 | 2+2. Overrides LAYOUT env."
+        help="Panel layout: auto (default — fit to configured providers) | stack | 1+1 | 1+2 | 2+2. Overrides LAYOUT env."
     )
     args = parser.parse_args()
 
@@ -624,7 +624,7 @@ def main():
 
     # ── --debug-json ───────────────────────────────────────────────────────
     if args.debug_json:
-        ok = debug_json()
+        ok = debug_json(layout=args.layout)
         sys.exit(0 if ok else 1)
 
     # ── default / --preview / --text ───────────────────────────────────────
