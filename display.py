@@ -45,6 +45,10 @@ QUOTE0_IMAGE_TASK_KEY = _env("QUOTE0_IMAGE_TASK_KEY")
 QUOTE0_TEXT_TASK_KEY  = _env("QUOTE0_TEXT_TASK_KEY")
 QUOTE0_PREVIEW_PATH   = _env("QUOTE0_PREVIEW_PATH", "/tmp/quote0_burnout_preview.png")
 
+# Last good snapshot — served when the Codex API is unreachable.
+# Pattern ported from PR #2 by Scott Zheng (heishanmao/quote0-burnout).
+SNAPSHOT_CACHE_PATH = _HERE / "tmp" / "last_snapshot.json"
+
 API_BASE = "https://dot.mindreset.tech"
 
 # ── Status helpers ────────────────────────────────────────────────────────────
@@ -520,14 +524,40 @@ def build_claude_snapshot(claude: dict) -> dict:
 
 
 def build_snapshot() -> dict:
-    """Fetch and build full snapshot."""
+    """Fetch and build full snapshot, falling back to cache on failure.
+
+    On success the snapshot JSON is cached at SNAPSHOT_CACHE_PATH. If the
+    Codex API is unreachable the last cached codex snapshot is served,
+    marked `` (cached)`` in updated_at, with a freshly-fetched claude
+    panel overlaid. Cache writes are best-effort.
+    """
     codex = get_codex_usage()
     claude = get_claude_usage()
-    return {
+    snap = {
         "codex": build_codex_snapshot(codex),
         "claude": build_claude_snapshot(claude),
         "updated_at": datetime.now().strftime("%H:%M"),
+        "_cached": False,
     }
+    if codex.get("ok"):
+        try:
+            SNAPSHOT_CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
+            SNAPSHOT_CACHE_PATH.write_text(json.dumps(snap, indent=2), encoding="utf-8")
+        except OSError:
+            pass  # caching is best-effort — never fail a refresh over it
+        return snap
+
+    # Codex fetch failed → serve the last good codex snapshot if we have one
+    try:
+        cached = json.loads(SNAPSHOT_CACHE_PATH.read_text(encoding="utf-8"))
+        if cached.get("codex", {}).get("ok"):
+            cached["updated_at"] = snap["updated_at"] + " (cached)"
+            cached["_cached"] = True
+            cached["claude"] = snap["claude"]  # refresh what is fresh
+            return cached
+    except (OSError, ValueError):
+        pass
+    return snap
 
 
 # ── Legacy normalize (v0.2–v0.3 compat) ───────────────────────────────────────
