@@ -146,7 +146,8 @@ function getOpenCode() {
     const u = (r.data && r.data.usage) || {};
     const roll = u.rolling || {};
     const wk = u.weekly || {};
-    return { ok: true, used: roll.percent || 0, reset: roll.resetsAt || null, wkUsed: wk.percent || null, wkReset: wk.resetsAt || null };
+    const mo = u.monthly || {};
+    return { ok: true, used: roll.percent || 0, reset: roll.resetsAt || null, wkUsed: wk.percent || null, wkReset: wk.resetsAt || null, moUsed: mo.percent || null, moReset: mo.resetsAt || null };
   } catch (e) { return { ok: false, msg: String(e) }; }
 }
 
@@ -248,6 +249,10 @@ $widget.setTimeline(function(ctx) {
     if (oc.wkUsed != null) {
       const ow_ = 100 - oc.wkUsed;
       rows.push({ text: "    Wk " + pctBar(oc.wkUsed, barW) + " " + ow_.toFixed(0) + "% " + fmtTime(oc.wkReset), size: fSize });
+    }
+    if (oc.moUsed != null) {
+      const om_ = 100 - oc.moUsed;
+      rows.push({ text: "    Mo " + pctBar(oc.moUsed, barW) + " " + om_.toFixed(0) + "% " + fmtTime(oc.moReset), size: fSize });
     }
   } else if (useDs) {
     rows.push({ text: "—".repeat(compact ? 14 : 20), size: sSize });

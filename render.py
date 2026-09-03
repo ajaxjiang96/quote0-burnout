@@ -230,11 +230,13 @@ def _render_v5(img: Image.Image, draw: ImageDraw.ImageDraw, snap: dict):
         _logo(LOGO_OPENCODE, y)
         draw.text((LABEL_X, y), "OPENCODE-GO", font=label, fill=BLACK)
         if oc.get("ok"):
-            r = oc.get("rolling", {})
-            used_s = f"{r['used_percent']}%" if r.get("used_percent") is not None else "?"
-            wk = oc.get("weekly", {})
-            wk_s = f" Wk {wk['used_percent']}%" if wk.get("used_percent") is not None else ""
-            note = f"{used_s} reset {r.get('reset', '?')}{wk_s}"
+            # All dollar windows: 5h / Wk / Mo ($12 / $30 / $60 limits).
+            bits = []
+            for lbl, key in (("5h", "rolling"), ("Wk", "weekly"), ("Mo", "monthly")):
+                w = oc.get(key) or {}
+                if w.get("used_percent") is not None:
+                    bits.append(f"{lbl} {w['used_percent']}% {w.get('reset', '?')}")
+            note = "  ".join(bits) or oc.get("status", "error")
             nw, nh = _tsize(draw, note, small)
             _, lh_ = _tsize(draw, "OPENCODE-GO", label)
             draw.text((W - PAD - nw, y + (lh_ - nh) // 2), note, font=small, fill=BLACK)
