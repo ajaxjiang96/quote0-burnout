@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 import requests
 
 from .core import env as _env, pct_status as _pct_status, time_until as _time_until
+
 CODEX_AUTH_PATH = Path.home() / ".codex" / "auth.json"
 CODEX_USAGE_URL = "https://chatgpt.com/backend-api/wham/usage"
 def _load_codex_token():
