@@ -7,6 +7,7 @@ v0.8: matched Codex + Claude panels with shared row, bar, and icon sizing.
 from __future__ import annotations
 
 import io
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
@@ -18,6 +19,7 @@ PAD = 10
 FONT_PATH = "/System/Library/Fonts/Menlo.ttc"
 PIXEL_FONT = Path(__file__).parent / "assets" / "fonts" / "Minecraftia-Regular.ttf"
 OP_FONT    = Path(__file__).parent / "assets" / "fonts" / "PixelOperator.ttf"
+VCR_FONT   = Path(__file__).parent / "assets" / "fonts" / "VCR_OSD_MONO_1.001.ttf"
 LOGO_CODEX    = Image.open(Path(__file__).parent / "assets" / "logos" / "codex.png").convert("1")
 LOGO_CLAUDE   = Image.open(Path(__file__).parent / "assets" / "logos" / "claude.png").convert("1")
 LOGO_DEEPSEEK = Image.open(Path(__file__).parent / "assets" / "logos" / "deepseek.png").convert("1")
@@ -49,6 +51,17 @@ def _op() -> ImageFont.FreeTypeFont:
     if _op_font_cache is None:
         _op_font_cache = ImageFont.truetype(str(OP_FONT), 16)
     return _op_font_cache
+
+_vcr_font_cache = None
+
+
+def _vcr() -> ImageFont.FreeTypeFont:
+    """VCR OSD Mono at its native 21px — the original DeepSeek balance face.
+    A larger primary value than PixelOperator 16, still pixel-perfect."""
+    global _vcr_font_cache
+    if _vcr_font_cache is None:
+        _vcr_font_cache = ImageFont.truetype(str(VCR_FONT), 21)
+    return _vcr_font_cache
 
 def _tsize(draw: ImageDraw.ImageDraw, text: str, font: ImageFont.FreeTypeFont):
     bbox = draw.textbbox((0, 0), text, font=font)
@@ -307,6 +320,283 @@ def _render_v5(img: Image.Image, draw: ImageDraw.ImageDraw, snap: dict):
             y = _draw_deepseek_row(y, logo_img, title, sn)
 
 
+# ── Grid layout engine (1+1 / 1+2 / 2+2) ────────────────────────────────────
+# Screen = 2 rows × 76px. ½ panel = one full-width row (296×76); ¼ cell = 148×76.
+
+CELL_W, CELL_H = 148, 76
+CELL_PAD = 6
+
+
+@dataclass(frozen=True)
+class _Cell:
+    x0: int
+    y0: int
+    w: int
+    h: int
+    kind: str  # "half" | "q"
+
+
+LAYOUTS = {
+    # 1+1: two stacked full-width halves
+    "1+1": [_Cell(0, 0, 296, 76, "half"), _Cell(0, 76, 296, 76, "half")],
+    # 1+2: half on TOP + two quarters on the BOTTOM
+    "1+2": [
+        _Cell(0, 0, 296, 76, "half"),
+        _Cell(0, 76, 148, 76, "q"),
+        _Cell(148, 76, 148, 76, "q"),
+    ],
+    # 2+2: four quarter cells
+    "2+2": [
+        _Cell(0, 0, 148, 76, "q"), _Cell(148, 0, 148, 76, "q"),
+        _Cell(0, 76, 148, 76, "q"), _Cell(148, 76, 148, 76, "q"),
+    ],
+}
+
+_PROVIDER_ORDER = ("codex", "claude", "deepseek", "opencode")
+_TITLE_BY_NAME = {
+    "codex": "CODEX", "claude": "CLAUDE",
+    "deepseek": "DEEPSEEK", "opencode": "OPENCODE-GO",
+}
+_LOGO_BY_NAME = {
+    "codex": LOGO_CODEX, "claude": LOGO_CLAUDE,
+    "deepseek": LOGO_DEEPSEEK, "opencode": LOGO_OPENCODE,
+}
+
+
+def _logo_paste(img, logo_img, x, y):
+    for dy in range(LOGO_W):
+        for dx in range(LOGO_W):
+            if logo_img.getpixel((dx, dy)) == 0:
+                img.putpixel((x + dx, y + dy), BLACK)
+
+
+def _clip_text(draw, text, font, max_w):
+    """Truncate text to fit max_w; no ellipsis (pixel fonts lack the glyph)."""
+    if _tsize(draw, text, font)[0] <= max_w:
+        return text
+    while text and _tsize(draw, text, font)[0] > max_w:
+        text = text[:-1]
+    return text
+
+
+def _hdash(draw, y, x0, x1, dash_len=6, gap_len=4):
+    x = x0
+    while x < x1:
+        draw.line([(x, y), (min(x + dash_len - 1, x1), y)], fill=BLACK, width=1)
+        x += dash_len + gap_len
+
+
+def _vdash(draw, x, y0, y1, dash_len=6, gap_len=4):
+    y = y0
+    while y < y1:
+        draw.line([(x, y), (x, min(y + dash_len - 1, y1))], fill=BLACK, width=1)
+        y += dash_len + gap_len
+
+
+def _junction(draw, x, y, arms):
+    """Solid 1px junction: 2px arms per direction (l/r/u/d)."""
+    if "l" in arms:
+        draw.line([(x - 2, y), (x, y)], fill=BLACK)
+    if "r" in arms:
+        draw.line([(x, y), (x + 2, y)], fill=BLACK)
+    if "u" in arms:
+        draw.line([(x, y - 2), (x, y)], fill=BLACK)
+    if "d" in arms:
+        draw.line([(x, y), (x, y + 2)], fill=BLACK)
+
+
+def _draw_seams(draw, layout):
+    y = CELL_H
+    if layout == "2+2":
+        _hdash(draw, y, 0, W)
+        _vdash(draw, CELL_W, 0, H)
+        _junction(draw, CELL_W, y, ("l", "r", "u", "d"))  # ┼
+    elif layout == "1+2":
+        _hdash(draw, y, 0, W)
+        _vdash(draw, CELL_W, y, H)  # bottom row only
+        _junction(draw, CELL_W, y, ("l", "r", "d"))       # ┴
+    elif layout == "1+1":
+        _hdash(draw, y, 0, W)
+
+
+def _live_providers(snapshot) -> list[str]:
+    """Providers whose last fetch succeeded (ok=True) — dead providers
+    (no auth, timeouts) are hidden, not shown as error cells."""
+    return [k for k in _PROVIDER_ORDER if snapshot.get(k, {}).get("ok")]
+
+
+def _resolve_auto(snapshot) -> str:
+    n = len(_live_providers(snapshot))
+    return {0: "stack", 1: "stack", 2: "1+1", 3: "1+2"}.get(n, "2+2")
+
+
+def _select_panels(snapshot, live, n) -> list[str]:
+    """Pick n providers: primaries (codex, claude) first, then secondaries
+    (deepseek, opencode). When only one secondary slot is left, the
+    second_panel preference arbitrates; a compatible auto layout never
+    needs arbitration because slots fit the secondaries' count."""
+    primaries = [p for p in ("codex", "claude") if p in live]
+    secondaries = [p for p in ("deepseek", "opencode") if p in live]
+    chosen = list(primaries[:n])
+    room = n - len(chosen)
+    if room >= len(secondaries):
+        chosen += secondaries
+    elif room > 0:
+        pref = snapshot.get("second_panel")
+        pick = pref if pref in secondaries else (
+            "opencode" if "opencode" in secondaries else secondaries[0])
+        chosen.append(pick)
+    return chosen[:n]
+
+
+def _plan_layout(snapshot) -> tuple[str, list]:
+    """(mode, jobs) where jobs = [(provider_name, _Cell), ...].
+
+    mode == "stack" → caller falls back to _render_v5."""
+    raw = snapshot.get("layout") or "stack"
+    if raw == "auto":
+        raw = _resolve_auto(snapshot)
+    if raw not in LAYOUTS:
+        return "stack", []
+    cells = LAYOUTS[raw]
+    jobs = list(zip(_select_panels(snapshot, _live_providers(snapshot), len(cells)), cells))
+    return raw, jobs
+
+
+def _cell_note_x(draw, rows, small):
+    notes = []
+    for _, used, reset in rows:
+        _, nw = _usage_note(draw, used, reset, small)
+        notes.append(nw)
+    return W - PAD - max(notes) if notes else None
+
+
+def _q_title(img, draw, name, cell):
+    """Quarter-cell header: 16px logo + 16px PixelOperator title — identical
+    faces AND geometry (PAD / LABEL_X) to the half cards so all panels
+    share one left edge."""
+    logo = _LOGO_BY_NAME.get(name)
+    if logo is not None:
+        _logo_paste(img, logo, cell.x0 + PAD, cell.y0 + 2)
+    draw.text((cell.x0 + LABEL_X, cell.y0 + 2),
+              _TITLE_BY_NAME.get(name, name.upper()), font=_op(), fill=BLACK)
+
+
+def _q_lines(draw, cell, rows):
+    """Two content lines from (label, used, reset) rows — remaining%.
+
+    Face: PixelOperator at its NATIVE 16px (pixel grid — scaling a pixel
+    font breaks glyphs, e.g. the '.'; see the 12px regressions). Same face
+    as half-tier labels; widest string 'Week 59% 123h3m' measured 105px
+    against the 136px content width of a 148px cell."""
+    qfont = _op()
+    y = cell.y0 + 26
+    for lbl, used, reset in rows[:2]:
+        line = f"{lbl} {100 - used:.0f}% {reset}" if used is not None else f"{lbl} ?"
+        line = _clip_text(draw, line, qfont, cell.w - 2 * PAD)
+        draw.text((cell.x0 + PAD, y), line, font=qfont, fill=BLACK)
+        y += 24
+
+
+def _draw_cell(img, draw, name, sn, cell):
+    label = _op()
+    small = _pixel()
+
+    if cell.kind == "q":
+        _q_title(img, draw, name, cell)
+        if not sn.get("ok"):
+            status = _clip_text(draw, sn.get("raw_status", "error"), small, cell.w - 2 * CELL_PAD)
+            draw.text((cell.x0 + CELL_PAD, cell.y0 + 24), status, font=small, fill=BLACK)
+            return
+        if name in ("codex", "claude"):
+            _q_lines(draw, cell, _window_rows(sn))
+        elif name == "opencode":
+            rows = []
+            for lbl, key in (("5h", "rolling"), ("Wk", "weekly"), ("Mo", "monthly")):
+                w = sn.get(key) or {}
+                if w.get("used_percent") is not None:
+                    rows.append((lbl, w["used_percent"], w.get("reset", "?")))
+            _q_lines(draw, cell, rows)
+        elif name == "deepseek":
+            sym = sn.get("symbol", "$")
+            bal = f"{sym}{sn.get('balance', 0):.2f}" if sn.get("balance") is not None else "?"
+            # balance = PRIMARY value of the cell: VCR 21px (native face,
+            # same as the pre-#1 stack design), badge below at 16px
+            draw.text((cell.x0 + PAD, cell.y0 + 26), bal, font=_vcr(), fill=BLACK)
+            win = sn.get("window")
+            if win:
+                extra = f" {sn.get('countdown', '')}" if sn.get("countdown") else ""
+                badge = f"{win} {sym}{sn.get('price_in', 0):.2f}{extra}"
+                badge = _clip_text(draw, badge, label, cell.w - 2 * PAD)
+                draw.text((cell.x0 + PAD, cell.y0 + 48), badge, font=label, fill=BLACK)
+        return
+
+    # ── half tier ─────────────────────────────────────────────────────────
+    y_top = cell.y0 + PANEL_Y
+    logo = _LOGO_BY_NAME.get(name)
+    if logo is not None:
+        _logo_paste(img, logo, cell.x0 + PAD, y_top)
+    draw.text((LABEL_X, y_top), _TITLE_BY_NAME.get(name, name.upper()), font=label, fill=BLACK)
+
+    if not sn.get("ok"):
+        status = _clip_text(draw, sn.get("raw_status", "error"), small, cell.w - 2 * PAD - LABEL_X)
+        draw.text((LABEL_X, y_top + 24), status, font=small, fill=BLACK)
+        return
+
+    if name in ("codex", "claude"):
+        rows = _window_rows(sn)
+        n_x = _cell_note_x(draw, rows, small)
+        # bottom-anchor the row block: a 1-row panel hangs at the same
+        # seam-adjacent level as a 2-row one (no floating dead space)
+        row_y = max(y_top + PANEL_HEADER_H, cell.y0 + 62 - PANEL_ROW_H * len(rows))
+        for row in rows:
+            row_y = _draw_usage_row(
+                draw, row_y, row[0], row[1], row[2],
+                small, label, n_x, row_h=PANEL_ROW_H, bar_h=BAR_H)
+    elif name == "opencode":
+        rows = []
+        for lbl, key in (("5h", "rolling"), ("Wk", "weekly"), ("Mo", "monthly")):
+            w = sn.get(key) or {}
+            if w.get("used_percent") is not None:
+                rows.append((lbl, w["used_percent"], w.get("reset", "?")))
+        n_x = _cell_note_x(draw, rows, small)
+        row_y = max(y_top + PANEL_HEADER_H, cell.y0 + 62 - PANEL_ROW_H * len(rows))
+        for row in rows:
+            row_y = _draw_usage_row(
+                draw, row_y, row[0], row[1], row[2],
+                small, label, n_x, row_h=PANEL_ROW_H, bar_h=BAR_H)
+    elif name == "deepseek":
+        sym = sn.get("symbol", "$")
+        bal = f"{sym}{sn.get('balance', 0):.2f}" if sn.get("balance") is not None else "?"
+        dw, _ = _tsize(draw, _TITLE_BY_NAME.get(name, name.upper()), label)
+        draw.text((LABEL_X + dw + 6, y_top), bal, font=label, fill=BLACK)
+        win = sn.get("window")
+        if win:
+            lines = [f"next {sn.get('next_window', '?')} in {sn.get('countdown', '?')}"
+                     if sn.get("countdown") else f"window {win}",
+                     f"in {sym}{sn.get('price_in', 0):.2f} out {sym}{sn.get('price_out', 0):.2f}"]
+            vy = y_top + 40
+            for line in lines:
+                line = _clip_text(draw, line, small, cell.w - 2 * PAD - LABEL_X)
+                draw.text((LABEL_X, vy), line, font=small, fill=BLACK)
+                vy += 14
+
+
+def _render_grid(img: Image.Image, draw: ImageDraw.ImageDraw, snap: dict, layout: str):
+    mode, jobs = _plan_layout(snap)
+    if mode == "stack":
+        _render_v5(img, draw, snap)
+        return
+    _draw_seams(draw, mode)
+    # One global refresh time, top-right — cells don't duplicate it.
+    ts = snap.get("updated_at", "")
+    if ts:
+        tsw, _ = _tsize(draw, ts, _pixel())
+        draw.text((W - PAD - tsw, 4), ts, font=_pixel(), fill=BLACK)
+    for name, cell in jobs:
+        _draw_cell(img, draw, name, snap.get(name, {}), cell)
+
+
 # ── Legacy ────────────────────────────────────────────────────────────────
 
 def _render_legacy(draw, codex_text, claude_text):
@@ -335,7 +625,11 @@ def render_image(arg, claude_text=None):
     img = Image.new("L", (W, H), WHITE)
     draw = ImageDraw.Draw(img)
     if isinstance(arg, dict):
-        _render_v5(img, draw, arg)
+        layout = arg.get("layout")
+        if layout in (None, "stack"):
+            _render_v5(img, draw, arg)
+        else:
+            _render_grid(img, draw, arg, layout)
     else:
         _render_legacy(draw, arg, claude_text or "?")
     img = img.convert("1", dither=Image.Dither.NONE)
@@ -370,6 +664,8 @@ if __name__ == "__main__":
                      "status": "ok"},
         "second_panel": "opencode",
         "updated_at": "16:40",
+        "layout": "2+2",
+        "configured": ["codex", "claude", "deepseek", "opencode"],
     }
     png = render_image(snap)
     out = Path(__file__).parent / "test_render.png"
