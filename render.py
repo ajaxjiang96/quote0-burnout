@@ -128,16 +128,20 @@ def _usage_note(draw, used, reset, font):
 
 def _window_rows(sn: dict):
     return [
-        (
-            sn.get("short_label", "?"),
-            sn.get("short_used_percent"),
-            sn.get("short_reset", "?"),
-        ),
-        (
-            sn.get("long_label", "?"),
-            sn.get("long_used_percent"),
-            sn.get("long_reset", "?"),
-        ),
+        row
+        for row in [
+            (
+                sn.get("short_label", "?"),
+                sn.get("short_used_percent"),
+                sn.get("short_reset", "?"),
+            ),
+            (
+                sn.get("long_label", "?"),
+                sn.get("long_used_percent"),
+                sn.get("long_reset", "?"),
+            ),
+        ]
+        if row[1] is not None  # skip windows the API didn't return (e.g. no secondary)
     ]
 
 
