@@ -24,6 +24,7 @@ Week [████████░░░░░░░░] 61%  3d4h
 
 - **Codex / Claude**：同尺寸双行面板（5h / Week），内联点阵进度条，显示余量百分比 + 重置倒计时
 - **DeepSeek**：紧凑单行面板 —— 余额 + 当前峰谷计费档（PEAK/OFF）与到下一次切换的倒计时；价目表来源官方（2026-08），谷段 = 峰段 ×0.5
+- **第二面板**（DeepSeek 或 OpenCode Go 二选一，`SECOND_PANEL=auto` 时优先 OpenCode）：OpenCode Zen "Go" 订阅用量（$12/5h、$30/周、$60/月）直接展示 5h/Week 实用比例 + 重置倒计时
 - **图标**：Codex 和 Claude 都使用 16×16 单色 PNG；Claude 来自 Claude symbol 的墨水屏二值化版本
 - **字体**：PixelOperator 16px / Minecraftia 8px
 - Codex 数据直连 OpenAI OAuth API，**无需 CLI 依赖**

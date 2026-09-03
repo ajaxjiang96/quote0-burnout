@@ -43,6 +43,14 @@ DEEPSEEK_MODEL     = _env("DEEPSEEK_MODEL", "deepseek-v4-flash")
 CLAUDE_ACCESS_TOKEN = _env("CLAUDE_ACCESS_TOKEN") or _env("CODEXBAR_CLAUDE_OAUTH_TOKEN")
 QUOTE0_REFRESH_NOW = _env("QUOTE0_REFRESH_NOW", "false").lower() == "true"
 
+# OpenCode Go (OpenCode Zen "Go" flat-rate subscription) — second panel.
+# Dollar limits: $12 per 5h, $30 per week, $60 per month. Usage API returns %
+# of each window used + reset time.
+OPENCODE_GO_API_KEY = _env("OPENCODE_GO_API_KEY")
+OPENCODE_USAGE_URL  = "https://opencode.ai/zen/go/v1/usage"
+# Second panel: auto (prefer opencode-go, fall back to deepseek) | deepseek | opencode
+SECOND_PANEL = _env("SECOND_PANEL", "auto").strip().lower()
+
 QUOTE0_IMAGE_TASK_KEY = _env("QUOTE0_IMAGE_TASK_KEY")
 QUOTE0_TEXT_TASK_KEY  = _env("QUOTE0_TEXT_TASK_KEY")
 QUOTE0_PREVIEW_PATH   = _env("QUOTE0_PREVIEW_PATH", "/tmp/quote0_burnout_preview.png")
@@ -228,6 +236,113 @@ def get_deepseek_balance():
 
     except Exception:
         return {"ok": False, "status": "error"}
+
+
+# ── OpenCode Go (Zen) usage — second-panel provider ───────────────────────────
+# OpenCode Go is a flat-rate subscription (opencode.ai/zen/go). The usage API:
+#   GET https://opencode.ai/zen/go/v1/usage   (Bearer OPENCODE_GO_API_KEY)
+# returns dollar-budget limits mirrored as windows:
+#   {"usage": {"rolling": {"percent": 6, "resetsAt": "...", "status": "ok"},
+#              "weekly":  {...}, "monthly": {...}}}
+# Limits: $12 / 5h (rolling), $30 / week, $60 / month.
+
+def get_opencode_usage():
+    """Fetch OpenCode Go usage. rolling/weekly/monthly percent + reset time."""
+    if not OPENCODE_GO_API_KEY:
+        return {"ok": False, "status": "no key"}
+    try:
+        r = requests.get(
+            OPENCODE_USAGE_URL,
+            headers={
+                "Authorization": f"Bearer {OPENCODE_GO_API_KEY}",
+                "Accept": "application/json",
+                "User-Agent": "quote0-burnout",
+            },
+            timeout=15,
+        )
+        r.raise_for_status()
+        return {"ok": True, "raw": r.json()}
+    except requests.Timeout:
+        return {"ok": False, "status": "timeout"}
+    except requests.HTTPError as e:
+        detail = ""
+        try:
+            detail = e.response.text[:200]
+        except Exception:
+            pass
+        return {"ok": False, "status": f"HTTP {e.response.status_code}", "detail": detail}
+    except Exception as e:
+        return {"ok": False, "status": "error", "detail": str(e)[:200]}
+
+
+def _oc_win(w: dict) -> dict:
+    """Normalize one OpenCode usage window → {used_percent, reset}."""
+    used = w.get("percent")
+    try:
+        used = int(float(used)) if used is not None else None
+    except (ValueError, TypeError):
+        used = None
+    reset = _time_until(w.get("resetsAt")) if w.get("resetsAt") else "?"
+    return {"used_percent": used, "reset": reset}
+
+
+def build_opencode_snapshot(oc: dict) -> dict:
+    """Build structured opencode snapshot from Zen usage response.
+
+    Mirrors the codex snapshot shape (short=rolling 5h, long=weekly) so the
+    renderer can be reused; monthly is kept for text/JSON completeness.
+    """
+    if not oc.get("ok"):
+        return {
+            "ok": False,
+            "status": "error",
+            "raw_status": oc.get("status", "error"),
+            "rolling": {}, "weekly": {}, "monthly": {},
+        }
+
+    usage = oc.get("raw", {}).get("usage", {})
+    rolling = _oc_win(usage.get("rolling") or {})
+    weekly = _oc_win(usage.get("weekly") or {})
+    monthly = _oc_win(usage.get("monthly") or {})
+
+    percents = [x["used_percent"] for x in (rolling, weekly, monthly) if x["used_percent"] is not None]
+    status = _pct_status(max(percents)) if percents else "unknown"
+
+    return {
+        "ok": True,
+        "rolling": rolling,
+        "weekly": weekly,
+        "monthly": monthly,
+        "short_label": "5h",
+        "short_used_percent": rolling["used_percent"],
+        "short_reset": rolling["reset"],
+        "long_label": "Week",
+        "long_used_percent": weekly["used_percent"],
+        "long_reset": weekly["reset"],
+        "status": status,
+        "raw_status": "",
+    }
+
+
+def _resolve_second_panel(deepseek_sn: dict, opencode_sn: dict) -> str:
+    """Pick which provider renders as the second panel.
+
+    SECOND_PANEL env: 'auto' (prefer opencode-go, fall back to deepseek),
+    'deepseek' (deepseek only, opencode only if deepseek absent), 'opencode'
+    (opencode only, deepseek only if opencode absent). Returns 'none' when
+    neither source has data — the layout omits the panel entirely.
+    """
+    mode = SECOND_PANEL
+    if mode == "deepseek":
+        return "deepseek" if deepseek_sn.get("ok") else ("opencode" if opencode_sn.get("ok") else "none")
+    if mode == "opencode":
+        return "opencode" if opencode_sn.get("ok") else ("deepseek" if deepseek_sn.get("ok") else "none")
+    # auto
+    if opencode_sn.get("ok"):
+        return "opencode"
+    if deepseek_sn.get("ok"):
+        return "deepseek"
+    return "none"
 
 
 # ── Fetch ─────────────────────────────────────────────────────────────────────
@@ -728,10 +843,17 @@ def build_snapshot() -> dict:
     codex = get_codex_usage()
     claude = get_claude_usage()
     deepseek = get_deepseek_balance()
+    opencode = get_opencode_usage()
+    codex_sn = build_codex_snapshot(codex)
+    claude_sn = build_claude_snapshot(claude)
+    deepseek_sn = build_deepseek_snapshot(deepseek)
+    opencode_sn = build_opencode_snapshot(opencode)
     snap = {
-        "codex": build_codex_snapshot(codex),
-        "claude": build_claude_snapshot(claude),
-        "deepseek": build_deepseek_snapshot(deepseek),
+        "codex": codex_sn,
+        "claude": claude_sn,
+        "deepseek": deepseek_sn,
+        "opencode": opencode_sn,
+        "second_panel": _resolve_second_panel(deepseek_sn, opencode_sn),
         "updated_at": datetime.now().strftime("%H:%M"),
         "_cached": False,
     }
@@ -751,6 +873,8 @@ def build_snapshot() -> dict:
             cached["_cached"] = True
             cached["claude"] = snap["claude"]  # refresh what is fresh
             cached["deepseek"] = snap["deepseek"]
+            cached["opencode"] = snap["opencode"]
+            cached["second_panel"] = snap["second_panel"]
             return cached
     except (OSError, ValueError):
         pass
@@ -871,6 +995,53 @@ def format_deepseek_text(sn: dict) -> str:
     return " ".join(parts)
 
 
+def format_opencode_text(sn: dict) -> str:
+    """Format opencode snapshot for Text API (compact multi-window)."""
+    if not sn.get("ok"):
+        return sn.get("raw_status", "error")
+    parts = []
+    for lbl, key in (("5h", "rolling"), ("Wk", "weekly"), ("Mo", "monthly")):
+        w = sn.get(key)
+        if w and w.get("used_percent") is not None:
+            parts.append(f"{lbl} {w['used_percent']}% reset {w.get('reset', '?')}")
+    return " · ".join(parts) if parts else sn.get("status", "unknown").upper()
+
+
+def _second_panel_line(snapshot: dict) -> str | None:
+    """One-line summary of the active second panel for --preview output."""
+    second = snapshot.get("second_panel")
+    if second == "opencode":
+        oc = snapshot.get("opencode", {})
+        if oc.get("ok"):
+            r = oc.get("rolling", {})
+            used_s = f"{r['used_percent']}%" if r.get("used_percent") is not None else "?"
+            wk = oc.get("weekly", {})
+            wk_s = f" Wk {wk['used_percent']}%" if wk.get("used_percent") is not None else ""
+            return f"OpenCode:  {used_s} [{oc['status']}] reset {r.get('reset', '?')}{wk_s}"
+        return f"OpenCode:  {oc.get('raw_status', 'error')}"
+    if second == "deepseek":
+        ds = snapshot.get("deepseek", {})
+        if ds.get("ok"):
+            win = ds.get("window", "?")
+            return (
+                f"DeepSeek:  {ds['symbol']}{ds['balance']:.2f} [{ds['status']}] {win} "
+                f"in {ds['symbol']}{ds['price_in']:.2f} out {ds['symbol']}{ds['price_out']:.2f} "
+                f"{ds.get('next_window', '?')} in {ds.get('countdown', '?')}"
+            )
+        return f"DeepSeek:  {ds.get('raw_status', 'error')}"
+    return None  # no second panel
+
+
+def _second_panel_text(snapshot: dict) -> str:
+    """Active second panel's text-formatted string for Text API."""
+    second = snapshot.get("second_panel")
+    if second == "opencode":
+        return format_opencode_text(snapshot.get("opencode", {}))
+    if second == "deepseek":
+        return format_deepseek_text(snapshot.get("deepseek", {}))
+    return ""
+
+
 # ── Push ──────────────────────────────────────────────────────────────────────
 
 def push_image(png_bytes: bytes) -> dict:
@@ -930,14 +1101,19 @@ def run(preview: bool = False, text_mode: bool = False):
     if text_mode:
         cx_text = format_codex_text(snapshot["codex"])
         cl_text = format_claude_text(snapshot["claude"])
-        ds_text = format_deepseek_text(snapshot["deepseek"])
+        second_text = _second_panel_text(snapshot)
         print(f"Codex:     {cx_text.replace(chr(10), ' / ')}")
         print(f"Claude:    {cl_text.replace(chr(10), ' / ')}")
-        print(f"DeepSeek:  {ds_text.replace(chr(10), ' / ')}")
+        if second_text:
+            tag = "OpenCode" if snapshot.get("second_panel") == "opencode" else "DeepSeek"
+            print(f"{tag}:  {second_text.replace(chr(10), ' / ')}")
 
         now = snapshot["updated_at"]
+        message = f"Codex {cx_text}\nClaude {cl_text}"
+        if second_text:
+            message += f"\n{snapshot.get('second_panel', 'deepseek').capitalize()} {second_text}"
         payload = {
-            "message": f"Codex {cx_text}\nClaude {cl_text}\nDeepSeek {ds_text}",
+            "message": message,
             "signature": now,
         }
         result = push_text(payload)
@@ -964,6 +1140,9 @@ def run(preview: bool = False, text_mode: bool = False):
                     print(f"          {cl['long_label']} {cl['long_used_percent']}%")
             else:
                 print(f"Claude:    {cl['raw_status']}")
+            second_line = _second_panel_line(snapshot)
+            if second_line:
+                print(second_line)
             return True
 
         result = push_image(png)
