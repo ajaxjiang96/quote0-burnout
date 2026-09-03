@@ -8,6 +8,7 @@ from pathlib import Path
 import requests
 
 from .core import env as _env, pct_status as _pct_status, time_until as _time_until
+
 CODEX_AUTH_PATH = Path.home() / ".codex" / "auth.json"
 CODEX_USAGE_URL = "https://chatgpt.com/backend-api/wham/usage"
 def _load_codex_token():
@@ -169,3 +170,11 @@ def format_codex_text(sn: dict) -> str:
 get_usage = get_codex_usage
 build_snapshot = build_codex_snapshot
 format_text = format_codex_text
+
+
+def is_configured() -> bool:
+    """True when codex credentials are available (env token or ~/.codex/auth.json).
+
+    Reads via core.env so this module needs no direct os import (the
+    missing-import fix for the fetcher ships separately)."""
+    return bool(_env("CODEX_ACCESS_TOKEN").strip()) or CODEX_AUTH_PATH.exists()
