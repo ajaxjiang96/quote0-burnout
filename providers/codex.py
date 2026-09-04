@@ -12,6 +12,10 @@ from .core import env as _env, pct_status as _pct_status, time_until as _time_un
 
 CODEX_AUTH_PATH = Path.home() / ".codex" / "auth.json"
 CODEX_USAGE_URL = "https://chatgpt.com/backend-api/wham/usage"
+# The manual rate-limit reset credits are a separate endpoint: /usage only
+# carries the count (rate_limit_reset_credits.available_count), while the
+# credit's own expiry (e.g. 'Expires 10/4 10:13 AM') lives in credits[].
+CODEX_RESET_CREDITS_URL = "https://chatgpt.com/backend-api/wham/rate-limit-reset-credits"
 def _load_codex_token():
     """Return (access_token, account_id). Env var takes priority over auth.json."""
     env_token = os.environ.get("CODEX_ACCESS_TOKEN", "").strip()
@@ -29,19 +33,22 @@ def _load_codex_token():
     return tokens.get("access_token", ""), tokens.get("account_id", "")
 
 
+def _codex_headers():
+    access_token, account_id = _load_codex_token()
+    headers = {
+        "Authorization": f"Bearer {access_token}",
+        "Accept": "application/json",
+        "User-Agent": "quote0-burnout",
+    }
+    if account_id:
+        headers["ChatGPT-Account-Id"] = account_id
+    return headers
+
+
 def get_codex_usage():
     """Fetch OpenAI Codex usage via direct API (no codexbar dependency)."""
     try:
-        access_token, account_id = _load_codex_token()
-        headers = {
-            "Authorization": f"Bearer {access_token}",
-            "Accept": "application/json",
-            "User-Agent": "quote0-burnout",
-        }
-        if account_id:
-            headers["ChatGPT-Account-Id"] = account_id
-
-        r = requests.get(CODEX_USAGE_URL, headers=headers, timeout=15)
+        r = requests.get(CODEX_USAGE_URL, headers=_codex_headers(), timeout=15)
         r.raise_for_status()
         return {"ok": True, "raw": r.json()}
 
@@ -59,8 +66,37 @@ def get_codex_usage():
     except Exception as e:
         return {"ok": False, "status": "error", "detail": str(e)[:200]}
 
-def build_codex_snapshot(codex: dict) -> dict:
-    """Build structured codex snapshot from wham API response."""
+
+def get_codex_reset_credits():
+    """Fetch the manual rate-limit reset credits (count + per-credit expiry).
+
+    Same auth/error shape as get_codex_usage."""
+    try:
+        r = requests.get(CODEX_RESET_CREDITS_URL, headers=_codex_headers(), timeout=15)
+        r.raise_for_status()
+        return {"ok": True, "raw": r.json()}
+
+    except FileNotFoundError as e:
+        return {"ok": False, "status": "no auth", "detail": str(e)}
+    except requests.Timeout:
+        return {"ok": False, "status": "timeout"}
+    except requests.HTTPError as e:
+        detail = ""
+        try:
+            detail = e.response.text[:200]
+        except Exception:
+            pass
+        return {"ok": False, "status": f"HTTP {e.response.status_code}", "detail": detail}
+    except Exception as e:
+        return {"ok": False, "status": "error", "detail": str(e)[:200]}
+
+def build_codex_snapshot(codex: dict, reset_credits: dict | None = None) -> dict:
+    """Build structured codex snapshot from wham API response.
+
+    reset_credits: optional result of get_codex_reset_credits() — the
+    manual reset credits' count + expiry. Without it (or on failure) the
+    count falls back to /usage's rate_limit_reset_credits and the expiry
+    is None."""
     if not codex.get("ok"):
         status = codex.get("status", "error")
         return {
@@ -110,6 +146,26 @@ def build_codex_snapshot(codex: dict) -> dict:
         else:
             short_label = "Now"
 
+    # Manual rate-limit reset credits: count + expiry, from the dedicated
+    # endpoint (wham/rate-limit-reset-credits, passed in as reset_credits).
+    # /usage only carries the count — the credit's own expiry (e.g.
+    # 'Expires 10/4 10:13 AM GMT+8', credits[].expires_at) lives there and
+    # is NOT any usage window's reset time. If that endpoint failed, fall
+    # back to the /usage count with no expiry.
+    credits_raw = None
+    if reset_credits and reset_credits.get("ok"):
+        credits_raw = reset_credits.get("raw") or {}
+    if credits_raw is not None:
+        expiries = [
+            c.get("expires_at") for c in (credits_raw.get("credits") or [])
+            if c.get("status") == "available" and c.get("expires_at")
+        ]
+        resets_available = credits_raw.get("available_count")
+        reset_expiry = _time_until(min(expiries)) if expiries else None
+    else:
+        resets_available = (raw.get("rate_limit_reset_credits") or {}).get("available_count")
+        reset_expiry = None
+
     return {
         "ok": True,
         "short_label": short_label,
@@ -118,6 +174,8 @@ def build_codex_snapshot(codex: dict) -> dict:
         "long_label": "Week" if has_secondary else None,
         "long_used_percent": long_pct if has_secondary else None,
         "long_reset": _time_until(long_reset_ts) if long_reset_ts and has_secondary else None,
+        "resets_available": resets_available,
+        "reset_expiry": reset_expiry,
         "status": _pct_status(short_pct if short_pct is not None else long_pct),
         "raw_status": "",
     }
@@ -162,6 +220,16 @@ def format_codex_text(sn: dict) -> str:
     long_pct = sn.get("long_used_percent")
     if long_pct is not None:
         line += f"\n{sn['long_label']} {long_pct}%"
+
+    n = sn.get("resets_available")
+    expiry = sn.get("reset_expiry")
+    parts = []
+    if n is not None:
+        parts.append(f"{n} reset" if n == 1 else f"{n} resets")
+    if expiry:
+        parts.append(expiry)
+    if parts:
+        line += "\n" + " · ".join(parts)
 
     return line
 

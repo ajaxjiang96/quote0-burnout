@@ -528,10 +528,42 @@ def _q_line(lbl, used, reset) -> str:
     """One quarter content line. A missing/unknown reset is elided — the
     APIs can return None (e.g. codex long_reset) and printing the Python
     repr on the e-ink screen is the bug the guard exists for."""
+    if lbl == "Reset":
+        # codex reset row: 'Reset 1 · 29d' (credits · reset-credit expiry)
+        return f"Reset {reset}"
     if used is None:
         return f"{lbl} ?"
     reset = reset if reset and reset != "?" else ""
     return f"{lbl} {100 - used:.0f}% {reset}".strip()
+
+
+def _reset_note(sn: dict) -> str | None:
+    """Codex extra row: manual reset credits + the reset credit's expiry.
+
+    Values only ('1 · 29d') — the row's own label carries the Reset wording.
+    The expiry is the CREDIT's (from wham/rate-limit-reset-credits), not any
+    usage window's reset. None when the API returned neither (only codex has
+    reset credits, so claude/others naturally get None)."""
+    n = sn.get("resets_available")
+    expiry = sn.get("reset_expiry")
+    if n is None and not expiry:
+        return None
+    parts = [str(n)] if n is not None else []
+    if expiry:
+        parts.append(expiry)
+    return " · ".join(parts)
+
+
+def _draw_reset_row(draw, y, note, note_font, label_font, note_x,
+                    row_h=PANEL_ROW_H, bar_h=BAR_H):
+    """Bar-less Reset row: 16px label + 8px note, same pitch and right edge
+    as the usage rows so the panel reads as one unit."""
+    bar_y = y + (row_h - bar_h) // 2
+    _, lh = _tsize(draw, "Reset", label_font)
+    draw.text((PAD, bar_y + (bar_h - lh) // 2), "Reset", font=label_font, fill=BLACK)
+    nw, nh = _tsize(draw, note, note_font)
+    draw.text((note_x, bar_y + (bar_h - nh) // 2), note, font=note_font, fill=BLACK)
+    return y + row_h
 
 
 def _draw_cell(img, draw, name, sn, cell, reserve_ts=0):
@@ -541,7 +573,14 @@ def _draw_cell(img, draw, name, sn, cell, reserve_ts=0):
     if cell.kind == "q":
         _q_title(img, draw, name, cell, reserve_ts)
         if name in ("codex", "claude"):
-            _q_lines(draw, cell, _window_rows(sn))
+            rows = _window_rows(sn)
+            note = _reset_note(sn)
+            if note:
+                # third row at the same 16px face as the window lines (the
+                # compressed 15px pitch, like opencode's Mo row) — not a
+                # smaller note line.
+                rows = rows + [("Reset", None, note)]
+            _q_lines(draw, cell, rows)
         elif name == "opencode":
             _q_lines(draw, cell, _opencode_rows(sn))
         elif name == "deepseek":
@@ -572,12 +611,18 @@ def _draw_cell(img, draw, name, sn, cell, reserve_ts=0):
 
     if name in ("codex", "claude"):
         rows = _window_rows(sn)
-        n_x = _cell_note_x(draw, rows, small)
-        row_y = _half_row_y(cell, y_top, len(rows))
+        reset_note = _reset_note(sn)
+        notes_w = [_usage_note(draw, used, reset, small)[1] for _, used, reset in rows]
+        if reset_note:
+            notes_w.append(_tsize(draw, reset_note, small)[0])
+        n_x = W - PAD - max(notes_w) if notes_w else None
+        row_y = _half_row_y(cell, y_top, len(rows) + (1 if reset_note else 0))
         for row in rows:
             row_y = _draw_usage_row(
                 draw, row_y, row[0], row[1], row[2],
                 small, label, n_x, row_h=PANEL_ROW_H, bar_h=BAR_H)
+        if reset_note:
+            row_y = _draw_reset_row(draw, row_y, reset_note, small, label, n_x)
     elif name == "opencode":
         rows = _opencode_rows(sn)
         n_x = _cell_note_x(draw, rows, small)

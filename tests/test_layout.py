@@ -137,6 +137,40 @@ class DeepSeekHalfTests(unittest.TestCase):
         self.assertGreater(ink, 30, "info row should paint")
 
 
+class ResetRowTests(unittest.TestCase):
+    """Codex RESET row/line: manual reset credits + closest window expiry."""
+
+    def _snap_1x1(self):
+        snap = _full_snap("1+1", live=["codex", "deepseek"])
+        snap["codex"] = {"ok": True, "short_label": "Week", "short_used_percent": 100,
+                         "short_reset": "3d11h", "resets_available": 1,
+                         "closest_reset": "5h", "status": "hot"}
+        return snap
+
+    def test_half_reset_row_paints(self):
+        img = Image.open(io.BytesIO(render_image(self._snap_1x1())))
+        px = img.load()
+        # RESET label (16px, left) + note (8px, right-aligned) in the row block
+        left = sum(1 for x in range(8, 70) for y in range(44, 66) if px[x, y] < 128)
+        self.assertGreater(left, 10, "RESET label should paint the left band")
+        right = sum(1 for x in range(190, 290) for y in range(44, 66) if px[x, y] < 128)
+        self.assertGreater(right, 10, "reset note should be right-aligned")
+
+    def test_quarter_reset_line_paints(self):
+        snap = _full_snap("2+2")
+        snap["codex"].update({"resets_available": 1, "closest_reset": "5h"})
+        img = Image.open(io.BytesIO(render_image(snap)))
+        px = img.load()
+        ink = sum(1 for x in range(8, 148) for y in range(62, 74) if px[x, y] < 128)
+        self.assertGreater(ink, 5, "8px reset line should paint in the codex quadrant")
+
+    def test_no_reset_data_no_row(self):
+        # no resets/closest keys → no second band ink differences: the panel
+        # must not crash and stays within the usage rows only
+        img = Image.open(io.BytesIO(render_image(_full_snap("1+1", live=["codex", "deepseek"]))))
+        self.assertEqual(img.size, (296, 152))
+
+
 class GridRenderTests(unittest.TestCase):
     def _render(self, snap):
         png = render_image(snap)

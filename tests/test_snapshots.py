@@ -53,6 +53,41 @@ class CodexSnapshotTests(unittest.TestCase):
         self.assertEqual(sn["long_label"], "Week")
         self.assertEqual(sn["long_used_percent"], 40)
 
+    def test_reset_credits_endpoint(self):
+        from datetime import datetime, timedelta, timezone
+        now = datetime.now(timezone.utc)
+        # the credit's own expiry (10/4-style), NOT any window's reset_at
+        credits = {"ok": True, "raw": {
+            "available_count": 1,
+            "credits": [
+                {"id": "credit1", "status": "available",
+                 "expires_at": (now + timedelta(days=10)).isoformat()},
+                {"id": "credit2", "status": "redeemed",
+                 "expires_at": (now + timedelta(days=2)).isoformat()},
+            ],
+        }}
+        sn = display.build_codex_snapshot({"ok": True, "raw": {}}, reset_credits=credits)
+        self.assertEqual(sn["resets_available"], 1)
+        # '10d'/'9d23h' — ±1s wall-clock at the boundary; redeemed credits do
+        # not hijack the min (their 2-day expiry must be ignored)
+        self.assertIn(sn["reset_expiry"], ("10d", "9d23h"))
+
+    def test_reset_credits_failure_falls_back_to_usage_count(self):
+        # credits endpoint down → /usage's count still shown, no expiry
+        raw = {"rate_limit": {"primary_window": {"used_percent": 100}},
+               "rate_limit_reset_credits": {"available_count": 1}}
+        sn = display.build_codex_snapshot(
+            {"ok": True, "raw": raw},
+            reset_credits={"ok": False, "status": "timeout"})
+        self.assertEqual(sn["resets_available"], 1)
+        self.assertIsNone(sn["reset_expiry"])
+
+    def test_no_reset_data_is_none(self):
+        sn = display.build_codex_snapshot(
+            {"ok": True, "raw": {"rate_limit": {"primary_window": {"used_percent": 20}}}})
+        self.assertIsNone(sn["resets_available"])
+        self.assertIsNone(sn["reset_expiry"])
+
 
 class DeepSeekWindowTests(unittest.TestCase):
     def _window(self, hour, minute=0, currency="USD"):
