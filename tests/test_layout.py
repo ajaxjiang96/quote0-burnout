@@ -6,7 +6,11 @@ Reuses the mock snapshot helpers from test_render.py.
 """
 
 import io
+import sys
 import unittest
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))  # repo root for `python tests/test_layout.py`
 
 from PIL import Image
 
@@ -64,11 +68,18 @@ class PlanLayoutTests(unittest.TestCase):
         mode, jobs = render._plan_layout(_full_snap("2+2"))
         self.assertEqual([name for name, _ in jobs], ["codex", "claude", "deepseek", "opencode"])
 
-    def test_explicit_cramped_uses_second_panel_preference(self):
+    def test_single_secondary_slot_prefers_opencode(self):
+        # SECOND_PANEL was retired (recency ordering, issue #10): with one
+        # slot, opencode wins; the retired knob no longer changes the pick.
         snap = _full_snap("1+1", live=["codex", "deepseek", "opencode"])
         mode, jobs = render._plan_layout(snap)
         self.assertEqual([name for name, _ in jobs], ["codex", "opencode"])
         snap["second_panel"] = "deepseek"
+        mode, jobs = render._plan_layout(snap)
+        self.assertEqual([name for name, _ in jobs], ["codex", "opencode"])
+
+    def test_single_secondary_slot_falls_back_to_deepseek(self):
+        snap = _full_snap("1+1", live=["codex", "deepseek"])
         mode, jobs = render._plan_layout(snap)
         self.assertEqual([name for name, _ in jobs], ["codex", "deepseek"])
 
@@ -169,6 +180,57 @@ class GridRenderTests(unittest.TestCase):
         img = Image.open(io.BytesIO(render_image(snap)))
         self.assertEqual(img.size, (296, 152))
 
+    def test_opencode_quarter_shows_all_three_rows(self):
+        # 5h/Wk/Mo in the BR quarter: the monthly row compresses to a 15px
+        # pitch and must stay inside the cell.
+        img = self._render(_full_snap("2+2"))
+        px = img.load()
+        third = sum(1 for x in range(154, 290) for y in range(130, 145) if px[x, y] < 128)
+        self.assertGreater(third, 5, "monthly row should render in the BR quarter")
+        below = sum(1 for x in range(154, 290) for y in range(148, 152) if px[x, y] < 128)
+        self.assertEqual(below, 0, "quarter content must stay above the screen edge")
+
+    def test_opencode_three_rows_in_half_do_not_touch_screen_edge(self):
+        # 1+1 with opencode in the bottom half: 3 rows clamped so no ink
+        # within 3px of the screen's bottom edge.
+        img = self._render(_full_snap("1+1", live=["claude", "opencode"]))
+        px = img.load()
+        edge = sum(1 for x in range(0, 296) for y in (149, 150, 151) if px[x, y] < 128)
+        self.assertEqual(edge, 0, "no ink on the bottom three rows of the screen")
+        third = sum(1 for x in range(4, 292) for y in range(132, 148) if px[x, y] < 128)
+        self.assertGreater(third, 5, "third row should still render, clamped")
+
+    def test_deepseek_without_prices_renders_in_quarter_and_half(self):
+        # price_in/price_out arrive as None (cache or API gap): the badge
+        # and rate lines must skip rather than format None (TypeError).
+        ds = _deepseek()
+        ds["price_in"] = None
+        ds["price_out"] = None
+        img = self._render(_full_snap("2+2", deepseek=ds))
+        px = img.load()
+        q_count = sum(1 for x in range(4, 144) for y in range(100, 126) if px[x, y] < 128)
+        self.assertGreater(q_count, 5, "deepseek quarter should still render its balance")
+        img2 = self._render(_full_snap("1+1", live=["codex", "deepseek"], deepseek=ds))
+        px2 = img2.load()
+        h_count = sum(1 for x in range(4, 292) for y in range(88, 148) if px2[x, y] < 128)
+        self.assertGreater(h_count, 5, "deepseek half should still render its balance")
+
+
+class QuarterLineTests(unittest.TestCase):
+    """Pure line formatting — a missing reset is elided, never printed."""
+
+    def test_reset_none_elided(self):
+        self.assertEqual(render._q_line("Week", 39, None), "Week 61%")
+
+    def test_reset_unknown_marker_elided(self):
+        self.assertEqual(render._q_line("5h", 20, "?"), "5h 80%")
+
+    def test_reset_present_kept(self):
+        self.assertEqual(render._q_line("5h", 20, "12:30"), "5h 80% 12:30")
+
+    def test_used_none_shows_question(self):
+        self.assertEqual(render._q_line("Mo", None, "3d"), "Mo ?")
+
 
 if __name__ == "__main__":
     unittest.main()
@@ -180,15 +242,24 @@ class CachedTimestampTests(unittest.TestCase):
         self.assertEqual(render._grid_ts({"updated_at": "16:40", "_cached": False}), "16:40")
 
     def test_cached_ts_does_not_collide_with_ne_title(self):
-        snap = _full_snap("2+2")
+        # The fixture that actually stresses the reserve bound: both
+        # primaries dead → TR = OPENCODE-GO (widest title, ink to ~x253)
+        # against the cached ts ('16:40*', ink from ~x255). The all-live
+        # fixture put CLAUDE in TR and never reached the body of the old
+        # assertion's empty band — it could not fail on its own fixture.
+        snap = _full_snap("2+2", live=["deepseek", "opencode"])
         snap["_cached"] = True
         snap["updated_at"] = "16:40 (cached)"
         png = render_image(snap)
         img = Image.open(io.BytesIO(png))
         self.assertEqual(img.size, (296, 152))
         px = img.load()
-        # the top-right quarter (CLAUDE) title must not run under the ts:
-        # the strip between the title's right edge and the ts is reserved
-        self.assertFalse(
-            any(px[x, y] < 128 for x in range(244, 250) for y in range(2, 18)),
-            "top-right quarter title must not collide with the cached timestamp")
+        ts_left = min(x for x in range(248, 296)
+                      for y in range(4, 16) if px[x, y] < 128)
+        title_right = max(x for x in range(174, 254)
+                          for y in range(2, 18) if px[x, y] < 128)
+        self.assertLess(title_right, ts_left,
+                        "top-right quarter title must end before the ts ink")
+        # the fixture must genuinely stress the boundary; if metrics shrink
+        # the title this test silently goes vacuous again
+        self.assertGreater(title_right, ts_left - 10)
