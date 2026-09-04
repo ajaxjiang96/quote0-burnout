@@ -595,7 +595,9 @@ def _draw_cell(img, draw, name, sn, cell, reserve_ts=0):
         # balance inline with the title and left a dead middle band.)
         sym = sn.get("symbol", "$")
         bal = _clip_text(draw, _balance_text(sn), _vcr(), cell.w - 2 * PAD)
-        draw.text((cell.x0 + PAD, cell.y0 + 22), bal, font=_vcr(), fill=BLACK)
+        # Same anchor as the badge — both VCR strings share the bbox metrics
+        # ((0,4,…,19)), so equal anchors = perfectly aligned baselines.
+        draw.text((cell.x0 + PAD, cell.y0 + 24), bal, font=_vcr(), fill=BLACK)
         win = sn.get("window")
         if win:
             bw, _ = _tsize(draw, win, _vcr())
