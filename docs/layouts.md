@@ -26,7 +26,7 @@ Quote/0 屏幕 **296×152、黑白 1-bit**，由 `render.py` 渲染。布局引�
 ### ¼ 格
 
 - 头部与半屏栏同一字面和几何：16px logo + 16px 标题（PixelOperator 原生 16px；右上角时间戳较宽时标题会被裁切预留）
-- **Codex / Claude**：两行 16px `标签 剩余% 重置`；Codex 追加第三行 `RESET 1 · 5h`（同样是 16px，压缩 15px 行距，和 OpenCode 的 Mo 行一致 —— 手动重置额度 + 各窗口最近过期时间，跨主窗口与 additional_rate_limits 取 min）
+- **Codex / Claude**：两行 16px `标签 剩余% 重置`；Codex 追加第三行 `RESET 1 · 3d11h`（同样是 16px，压缩 15px 行距，和 OpenCode 的 Mo 行一致 —— 手动重置次数 + 主速率限制过期时间，即 CLI 显示的 "try again at …"，不含 per-model spinner 的 5h 滚动档）
 - **OpenCode**：三行（5h / Wk / Mo，第三行压缩间距）
 - **DeepSeek**：VCR OSD 21px 余额大字 + 16px 档位徽章（`OFF ¥1.50 1h50m`）
 - **死掉的 provider 不会出现在网格里**（ok=False → 隐藏，而不是画错误单元格）；显式布局的剩余格留白

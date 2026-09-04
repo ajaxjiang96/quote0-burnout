@@ -110,21 +110,24 @@ def build_codex_snapshot(codex: dict) -> dict:
         else:
             short_label = "Now"
 
-    # Manual rate-limit reset credits + the closest window expiry. The 5h/
-    # Week tiers for the per-model spinner (e.g. GPT-5.3-Codex-Spark) live
-    # in additional_rate_limits, so the nearest reset event is a min over
-    # EVERY window's reset_at, not just the primary.
+    # Manual rate-limit reset credits + the rate-limit expiry. The expiry is
+    # the MAIN limit's reset (primary/secondary + the upsell's reset_at,
+    # which is what the Codex UI prints as "try again at…"), NOT the
+    # additional_rate_limits per-model spinner windows (their 5h tier rolls
+    # over every few hours and always looks "closest", e.g. a 0%-used
+    # GPT-5.3-Codex-Spark window that the user isn't blocked on).
+    # rate_limit_reset_credits carries the reset COUNT only — the manual
+    # reset opportunity's own expiry (a ~30-day value the UI shows) is NOT
+    # exposed by this endpoint.
     credits = raw.get("rate_limit_reset_credits") or {}
     resets_available = credits.get("available_count")
+    upsell = raw.get("rate_limit_upsell") or {}
     reset_ts = []
     for w in (primary, secondary):
         if isinstance(w, dict) and w.get("reset_at"):
             reset_ts.append(w["reset_at"])
-    for extra in raw.get("additional_rate_limits") or []:
-        rl = extra.get("rate_limit") or {}
-        for w in (rl.get("primary_window"), rl.get("secondary_window")):
-            if isinstance(w, dict) and w.get("reset_at"):
-                reset_ts.append(w["reset_at"])
+    if isinstance(upsell, dict) and upsell.get("reset_at"):
+        reset_ts.append(upsell["reset_at"])
     closest_reset = _time_until(min(reset_ts)) if reset_ts else None
 
     return {

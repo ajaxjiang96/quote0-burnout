@@ -63,6 +63,9 @@ class CodexSnapshotTests(unittest.TestCase):
                 "secondary_window": None,
             },
             "rate_limit_reset_credits": {"available_count": 1, "applicable_available_count": 1},
+            "rate_limit_upsell": {"reset_at": now + 7200, "banner_type": "prolite_rate_limit_reached"},
+            # per-model spinner windows must NOT hijack the expiry (their 5h
+            # tier always looks closest; the user isn't blocked on them)
             "additional_rate_limits": [{
                 "limit_name": "GPT-5.3-Codex-Spark", "metered_feature": "codex_bengalfox",
                 "rate_limit": {
@@ -73,9 +76,9 @@ class CodexSnapshotTests(unittest.TestCase):
         }
         sn = display.build_codex_snapshot({"ok": True, "raw": raw})
         self.assertEqual(sn["resets_available"], 1)
-        # the spark 5h window is the nearest event (primary resets in 3d);
-        # ±1s of wall-clock at the boundary → '1h' or '59m'
-        self.assertIn(sn["closest_reset"], ("1h", "59m"))
+        # expiry = the main limit's reset (upsell's reset_at = 2h), NOT the
+        # spark 5h window's 1h; ±1s at the boundary → '2h' or '1h59m'
+        self.assertIn(sn["closest_reset"], ("2h", "1h59m"))
 
     def test_no_reset_data_is_none(self):
         sn = display.build_codex_snapshot(
