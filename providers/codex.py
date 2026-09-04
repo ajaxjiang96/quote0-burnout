@@ -110,6 +110,23 @@ def build_codex_snapshot(codex: dict) -> dict:
         else:
             short_label = "Now"
 
+    # Manual rate-limit reset credits + the closest window expiry. The 5h/
+    # Week tiers for the per-model spinner (e.g. GPT-5.3-Codex-Spark) live
+    # in additional_rate_limits, so the nearest reset event is a min over
+    # EVERY window's reset_at, not just the primary.
+    credits = raw.get("rate_limit_reset_credits") or {}
+    resets_available = credits.get("available_count")
+    reset_ts = []
+    for w in (primary, secondary):
+        if isinstance(w, dict) and w.get("reset_at"):
+            reset_ts.append(w["reset_at"])
+    for extra in raw.get("additional_rate_limits") or []:
+        rl = extra.get("rate_limit") or {}
+        for w in (rl.get("primary_window"), rl.get("secondary_window")):
+            if isinstance(w, dict) and w.get("reset_at"):
+                reset_ts.append(w["reset_at"])
+    closest_reset = _time_until(min(reset_ts)) if reset_ts else None
+
     return {
         "ok": True,
         "short_label": short_label,
@@ -118,6 +135,8 @@ def build_codex_snapshot(codex: dict) -> dict:
         "long_label": "Week" if has_secondary else None,
         "long_used_percent": long_pct if has_secondary else None,
         "long_reset": _time_until(long_reset_ts) if long_reset_ts and has_secondary else None,
+        "resets_available": resets_available,
+        "closest_reset": closest_reset,
         "status": _pct_status(short_pct if short_pct is not None else long_pct),
         "raw_status": "",
     }
@@ -162,6 +181,16 @@ def format_codex_text(sn: dict) -> str:
     long_pct = sn.get("long_used_percent")
     if long_pct is not None:
         line += f"\n{sn['long_label']} {long_pct}%"
+
+    n = sn.get("resets_available")
+    closest = sn.get("closest_reset")
+    parts = []
+    if n is not None:
+        parts.append(f"{n} reset" if n == 1 else f"{n} resets")
+    if closest:
+        parts.append(closest)
+    if parts:
+        line += "\n" + " · ".join(parts)
 
     return line
 

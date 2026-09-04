@@ -53,6 +53,36 @@ class CodexSnapshotTests(unittest.TestCase):
         self.assertEqual(sn["long_label"], "Week")
         self.assertEqual(sn["long_used_percent"], 40)
 
+    def test_resets_and_closest_expiry(self):
+        import time
+        now = int(time.time())
+        raw = {
+            "rate_limit": {
+                "primary_window": {"used_percent": 100, "reset_at": now + 3 * 86400,
+                                   "limit_window_seconds": 604800},
+                "secondary_window": None,
+            },
+            "rate_limit_reset_credits": {"available_count": 1, "applicable_available_count": 1},
+            "additional_rate_limits": [{
+                "limit_name": "GPT-5.3-Codex-Spark", "metered_feature": "codex_bengalfox",
+                "rate_limit": {
+                    "primary_window": {"used_percent": 0, "reset_at": now + 3600,
+                                       "limit_window_seconds": 18000},
+                },
+            }],
+        }
+        sn = display.build_codex_snapshot({"ok": True, "raw": raw})
+        self.assertEqual(sn["resets_available"], 1)
+        # the spark 5h window is the nearest event (primary resets in 3d);
+        # ±1s of wall-clock at the boundary → '1h' or '59m'
+        self.assertIn(sn["closest_reset"], ("1h", "59m"))
+
+    def test_no_reset_data_is_none(self):
+        sn = display.build_codex_snapshot(
+            {"ok": True, "raw": {"rate_limit": {"primary_window": {"used_percent": 20}}}})
+        self.assertIsNone(sn["resets_available"])
+        self.assertIsNone(sn["closest_reset"])
+
 
 class DeepSeekWindowTests(unittest.TestCase):
     def _window(self, hour, minute=0, currency="USD"):

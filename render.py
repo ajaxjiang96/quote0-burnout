@@ -534,6 +534,35 @@ def _q_line(lbl, used, reset) -> str:
     return f"{lbl} {100 - used:.0f}% {reset}".strip()
 
 
+def _reset_note(sn: dict) -> str | None:
+    """Codex extra line: manual reset credits + the closest window expiry.
+
+    '1 reset · 5h' — None when the API returned neither (only codex has
+    rate_limit_reset_credits, so claude/others naturally get None)."""
+    n = sn.get("resets_available")
+    closest = sn.get("closest_reset")
+    if n is None and not closest:
+        return None
+    parts = []
+    if n is not None:
+        parts.append(f"{n} reset" if n == 1 else f"{n} resets")
+    if closest:
+        parts.append(closest)
+    return " · ".join(parts)
+
+
+def _draw_reset_row(draw, y, note, note_font, label_font, note_x,
+                    row_h=PANEL_ROW_H, bar_h=BAR_H):
+    """Bar-less RESET row: 16px label + 8px note, same pitch and right edge
+    as the usage rows so the panel reads as one unit."""
+    bar_y = y + (row_h - bar_h) // 2
+    _, lh = _tsize(draw, "RESET", label_font)
+    draw.text((PAD, bar_y + (bar_h - lh) // 2), "RESET", font=label_font, fill=BLACK)
+    nw, nh = _tsize(draw, note, note_font)
+    draw.text((note_x, bar_y + (bar_h - nh) // 2), note, font=note_font, fill=BLACK)
+    return y + row_h
+
+
 def _draw_cell(img, draw, name, sn, cell, reserve_ts=0):
     label = _op()
     small = _pixel()
@@ -542,6 +571,10 @@ def _draw_cell(img, draw, name, sn, cell, reserve_ts=0):
         _q_title(img, draw, name, cell, reserve_ts)
         if name in ("codex", "claude"):
             _q_lines(draw, cell, _window_rows(sn))
+            note = _reset_note(sn)
+            if note:
+                note = _clip_text(draw, note, small, cell.w - 2 * PAD)
+                draw.text((cell.x0 + PAD, cell.y0 + 64), note, font=small, fill=BLACK)
         elif name == "opencode":
             _q_lines(draw, cell, _opencode_rows(sn))
         elif name == "deepseek":
@@ -572,12 +605,18 @@ def _draw_cell(img, draw, name, sn, cell, reserve_ts=0):
 
     if name in ("codex", "claude"):
         rows = _window_rows(sn)
-        n_x = _cell_note_x(draw, rows, small)
-        row_y = _half_row_y(cell, y_top, len(rows))
+        reset_note = _reset_note(sn)
+        notes_w = [_usage_note(draw, used, reset, small)[1] for _, used, reset in rows]
+        if reset_note:
+            notes_w.append(_tsize(draw, reset_note, small)[0])
+        n_x = W - PAD - max(notes_w) if notes_w else None
+        row_y = _half_row_y(cell, y_top, len(rows) + (1 if reset_note else 0))
         for row in rows:
             row_y = _draw_usage_row(
                 draw, row_y, row[0], row[1], row[2],
                 small, label, n_x, row_h=PANEL_ROW_H, bar_h=BAR_H)
+        if reset_note:
+            row_y = _draw_reset_row(draw, row_y, reset_note, small, label, n_x)
     elif name == "opencode":
         rows = _opencode_rows(sn)
         n_x = _cell_note_x(draw, rows, small)
