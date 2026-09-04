@@ -114,6 +114,47 @@ def _resolve_second_panel(deepseek_sn: dict, opencode_sn: dict) -> str:
 
 # ── Snapshot builder (v0.4) ────────────────────────────────────────────────────
 
+# Per-provider fields that change on every cycle (countdowns, resets) or
+# are internal bookkeeping — excluded from the change fingerprint so that
+# ticking timers never register as a data change.
+_VOLATILE_KEYS = {
+    "updated_at", "_fingerprint", "_cached",
+    "reset", "short_reset", "long_reset", "countdown",
+}
+
+
+def _strip_volatile(obj):
+    """Recursively drop volatile fields from a provider snapshot."""
+    if isinstance(obj, dict):
+        return {k: _strip_volatile(v) for k, v in obj.items() if k not in _VOLATILE_KEYS}
+    return obj
+
+
+def _provider_fingerprint(p_sn: dict) -> str:
+    """Deterministic hash of a provider's data — used for change detection.
+
+    Only values that semantically changed (percents, balance, window tier,
+    status) are hashed; reset/countdown strings tick constantly and would
+    otherwise mark every run as a change."""
+    return json.dumps(_strip_volatile(p_sn), sort_keys=True, default=str)
+
+
+def refresh_provider_ts(p_sn: dict, prev: dict | None, now: str) -> None:
+    """Stamp a provider's updated_at as its LAST DATA-CHANGE time.
+
+    The fingerprint is compared against the previous snapshot (served
+    through the snapshot cache); unchanged data keeps its older stamp so
+    the provider drifts back in recency priority, changed data gets now.
+    First run (no cache / no previous fingerprint): now."""
+    fp = _provider_fingerprint(p_sn)
+    p_sn["_fingerprint"] = fp  # persisted via the cache for the next run
+    prev = prev or {}
+    if prev.get("_fingerprint") != fp:
+        p_sn["updated_at"] = now
+    else:
+        p_sn["updated_at"] = prev.get("updated_at") or now
+
+
 def build_snapshot(layout: str | None = None) -> dict:
     """Fetch and build full snapshot, falling back to cache on failure.
 
@@ -123,11 +164,14 @@ def build_snapshot(layout: str | None = None) -> dict:
     opencode panels overlaid. Cache writes are best-effort.
 
     layout: None → LAYOUT env (default auto). The snapshot carries the
-    resolved layout, the configured-provider list, and the global refresh
-    time (updated_at) that the grid engine renders at the screen top-right.
+    resolved layout, the configured-provider list, the global refresh
+    time (updated_at, rendered at the screen top-right), and a per-provider
+    change-detection stamp — the provider data here can be ordered
+    most-recently-changed first (#10).
     """
     layout = layout if layout is not None else _normalize_layout(LAYOUT_ENV)
-    now = datetime.now().strftime("%H:%M")
+    now = datetime.now().strftime("%H:%M")                    # rendered global ts
+    now_stamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")  # sortable per-provider stamp
 
     codex = get_codex_usage()
     claude = get_claude_usage()
@@ -137,6 +181,17 @@ def build_snapshot(layout: str | None = None) -> dict:
     claude_sn = build_claude_snapshot(claude)
     deepseek_sn = build_deepseek_snapshot(deepseek)
     opencode_sn = build_opencode_snapshot(opencode)
+
+    # Previous snapshot (if any) for per-provider change detection — served
+    # through the same cache file the fallback path below reads.
+    try:
+        prev_snap = json.loads(SNAPSHOT_CACHE_PATH.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        prev_snap = None
+    for name, p_sn in (("codex", codex_sn), ("claude", claude_sn),
+                       ("deepseek", deepseek_sn), ("opencode", opencode_sn)):
+        refresh_provider_ts(p_sn, (prev_snap or {}).get(name), now_stamp)
+
     snap = {
         "codex": codex_sn,
         "claude": claude_sn,
@@ -144,8 +199,8 @@ def build_snapshot(layout: str | None = None) -> dict:
         "opencode": opencode_sn,
         "second_panel": _resolve_second_panel(deepseek_sn, opencode_sn),
         "layout": layout,
-        # reserved for the #10 panel-order work — the grid engine
-        # currently selects cells by live ok flags, not by this list.
+        # reserved for the #15 公版 provider contract — the grid engine
+        # orders cells by change recency (#10), not by this list.
         "configured": configured_providers(),
         "updated_at": now,
         "_cached": False,

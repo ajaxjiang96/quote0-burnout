@@ -254,5 +254,51 @@ class LayoutNormalizeTests(unittest.TestCase):
             self.assertEqual(display._normalize_layout(raw), "auto", raw)
 
 
+class ProviderTimestampTests(unittest.TestCase):
+    """Change detection (#10): volatile fields excluded, real changes tracked."""
+
+    def test_fingerprint_ignores_ticking_resets(self):
+        a = display._provider_fingerprint({
+            "ok": True, "short_label": "5h", "short_used_percent": 28,
+            "short_reset": "2h13m",
+            "rolling": {"used_percent": 6, "reset": "2h"},
+            "updated_at": "2026-09-04 09:00:00",
+        })
+        b = display._provider_fingerprint({
+            "ok": True, "short_label": "5h", "short_used_percent": 28,
+            "short_reset": "1h59m",
+            "rolling": {"used_percent": 6, "reset": "1h"},
+            "updated_at": "2026-09-04 09:05:00",
+        })
+        self.assertEqual(a, b, "ticking countdowns must not register as changes")
+
+    def test_fingerprint_tracks_real_change(self):
+        a = display._provider_fingerprint({"ok": True, "short_used_percent": 28})
+        b = display._provider_fingerprint({"ok": True, "short_used_percent": 31})
+        self.assertNotEqual(a, b)
+
+    def test_refresh_provider_ts_first_run(self):
+        now = "2026-09-04 09:00:00"
+        sn = {"ok": True, "short_used_percent": 28}
+        display.refresh_provider_ts(sn, None, now)
+        self.assertEqual(sn["updated_at"], now)
+        self.assertIn("_fingerprint", sn)
+
+    def test_refresh_provider_ts_unchanged_keeps_stamp(self):
+        now = "2026-09-04 09:00:00"
+        first = {"ok": True, "short_used_percent": 28}
+        display.refresh_provider_ts(first, None, now)
+        second = {"ok": True, "short_used_percent": 28, "short_reset": "2h13m"}
+        display.refresh_provider_ts(second, first, "2026-09-04 09:30:00")
+        self.assertEqual(second["updated_at"], now, "unchanged data keeps its old stamp")
+
+    def test_refresh_provider_ts_changed_stamps_now(self):
+        first = {"ok": True, "short_used_percent": 28}
+        display.refresh_provider_ts(first, None, "2026-09-04 09:00:00")
+        changed = {"ok": True, "short_used_percent": 31}
+        display.refresh_provider_ts(changed, first, "2026-09-04 09:30:00")
+        self.assertEqual(changed["updated_at"], "2026-09-04 09:30:00")
+
+
 if __name__ == "__main__":
     unittest.main()

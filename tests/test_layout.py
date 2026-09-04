@@ -68,15 +68,24 @@ class PlanLayoutTests(unittest.TestCase):
         mode, jobs = render._plan_layout(_full_snap("2+2"))
         self.assertEqual([name for name, _ in jobs], ["codex", "claude", "deepseek", "opencode"])
 
-    def test_single_secondary_slot_prefers_opencode(self):
-        # SECOND_PANEL was retired (recency ordering, issue #10): with one
-        # slot, opencode wins; the retired knob no longer changes the pick.
+    def test_single_secondary_slot_ties_fall_back_to_canonical(self):
+        # #32's "one slot → opencode first" was the stopgap until #10: with
+        # no change signal (no per-provider stamps) the tie falls back to
+        # canonical order; a real recency signal outranks it — the whole
+        # point of recency ordering.
         snap = _full_snap("1+1", live=["codex", "deepseek", "opencode"])
         mode, jobs = render._plan_layout(snap)
-        self.assertEqual([name for name, _ in jobs], ["codex", "opencode"])
+        self.assertEqual([name for name, _ in jobs], ["codex", "deepseek"])
         snap["second_panel"] = "deepseek"
         mode, jobs = render._plan_layout(snap)
-        self.assertEqual([name for name, _ in jobs], ["codex", "opencode"])
+        self.assertEqual([name for name, _ in jobs], ["codex", "deepseek"])
+        # recency beats the tiebreak: deepseek changed → it takes the slot
+        for name, p_sn in snap.items():
+            if isinstance(p_sn, dict) and p_sn.get("ok"):
+                p_sn["updated_at"] = "2026-09-04 07:00:00"
+        snap["deepseek"]["updated_at"] = "2026-09-04 09:00:00"
+        mode, jobs = render._plan_layout(snap)
+        self.assertEqual([name for name, _ in jobs], ["deepseek", "codex"])
 
     def test_single_secondary_slot_falls_back_to_deepseek(self):
         snap = _full_snap("1+1", live=["codex", "deepseek"])
@@ -232,8 +241,74 @@ class QuarterLineTests(unittest.TestCase):
         self.assertEqual(render._q_line("Mo", None, "3d"), "Mo ?")
 
 
-if __name__ == "__main__":
-    unittest.main()
+class OrderPanelsTests(unittest.TestCase):
+    """_order_panels: recency-first ordering with canonical tiebreak."""
+
+    def _snap(self, stamps, live):
+        snap = {"layout": "2+2", "updated_at": "16:40"}
+        for name in ("codex", "claude", "deepseek", "opencode"):
+            if name in live:
+                sn = {"ok": True}
+                if name in stamps:
+                    sn["updated_at"] = stamps[name]
+                snap[name] = sn
+            else:
+                snap[name] = _NOT_OK
+        return snap
+
+    def test_most_recent_changed_first(self):
+        snap = self._snap({
+            "codex": "2026-09-04 08:00:00", "claude": "2026-09-04 06:00:00",
+            "deepseek": "2026-09-04 09:00:00", "opencode": "2026-09-04 07:00:00",
+        }, ("codex", "claude", "deepseek", "opencode"))
+        self.assertEqual(render._order_panels(snap, render._live_providers(snap), 4),
+                         ["deepseek", "codex", "opencode", "claude"])
+
+    def test_full_tie_falls_back_to_canonical(self):
+        snap = self._snap({
+            "codex": "2026-09-04 09:00:00", "claude": "2026-09-04 09:00:00",
+            "deepseek": "2026-09-04 09:00:00", "opencode": "2026-09-04 09:00:00",
+        }, ("codex", "claude", "deepseek", "opencode"))
+        self.assertEqual(render._order_panels(snap, render._live_providers(snap), 4),
+                         ["codex", "claude", "deepseek", "opencode"])
+
+    def test_partial_tie_canonical_among_equals(self):
+        # codex newest; claude+deepseek tied → canonical keeps claude ahead
+        snap = self._snap({
+            "codex": "2026-09-04 09:00:00", "claude": "2026-09-04 07:00:00",
+            "deepseek": "2026-09-04 07:00:00", "opencode": "2026-09-04 06:00:00",
+        }, ("codex", "claude", "deepseek", "opencode"))
+        self.assertEqual(render._order_panels(snap, render._live_providers(snap), 4),
+                         ["codex", "claude", "deepseek", "opencode"])
+
+    def test_missing_stamps_canonical(self):
+        snap = self._snap({}, ("codex", "claude", "deepseek", "opencode"))
+        self.assertEqual(render._order_panels(snap, render._live_providers(snap), 4),
+                         ["codex", "claude", "deepseek", "opencode"])
+
+    def test_slots_take_top_n(self):
+        # 3 live, 2 slots: the two most-recently-changed get the cells
+        snap = self._snap({
+            "codex": "2026-09-04 08:00:00", "deepseek": "2026-09-04 09:00:00",
+            "opencode": "2026-09-04 07:00:00",
+        }, ("codex", "deepseek", "opencode"))
+        self.assertEqual(render._order_panels(snap, render._live_providers(snap), 2),
+                         ["deepseek", "codex"])
+
+    def test_plan_layout_jobs_follow_recency(self):
+        snap = self._snap({
+            "codex": "2026-09-04 07:00:00", "claude": "2026-09-04 09:00:00",
+            "deepseek": "2026-09-04 08:00:00", "opencode": "2026-09-04 06:00:00",
+        }, ("codex", "claude", "deepseek", "opencode"))
+        mode, jobs = render._plan_layout(snap)
+        self.assertEqual(mode, "2+2")
+        self.assertEqual([name for name, _ in jobs],
+                         ["claude", "deepseek", "codex", "opencode"])
+
+    def test_dead_provider_never_ordered(self):
+        snap = self._snap({"deepseek": "2026-09-04 09:00:00"}, ("deepseek", "opencode"))
+        self.assertEqual(render._order_panels(snap, render._live_providers(snap), 4),
+                         ["deepseek", "opencode"])
 
 
 class CachedTimestampTests(unittest.TestCase):
