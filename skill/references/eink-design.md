@@ -12,16 +12,17 @@ Screen = **2 rows × 76px**. A ½ panel = one full-width row (296×76); a ¼ cel
 | `1+1` | two stacked ½ panels |
 | `1+2` | one ½ panel on TOP + two ¼ cells on the BOTTOM |
 | `2+2` | four ¼ cells (2×2) |
-| `auto` | fit to configured providers: N=2→1+1, N=3→1+2, N≥4→2+2 (N≤1→stack) |
+| `auto` | fit to providers whose fetch succeeded (ok=True): N=2→1+1, N=3→1+2, N≥4→2+2 (N≤1→stack) |
 
-- `LAYOUT` env or `--layout` CLI override. Snapshot carries `layout` + `configured`; absent key → stack.
+- `LAYOUT` env or `--layout` CLI override. Snapshot carries `layout` + `configured` (the latter reserved for #10's ordering — selection is live-ok based); absent key → stack.
 - Provider selection: primaries (codex, claude) first, then secondaries (deepseek, opencode).
   Auto layouts fit the secondaries so `2+2` shows all four; a single secondary slot
   follows `SECOND_PANEL`.
 - **Seams**: dashed 6px/4px, with solid 1px junction arms (2px each side) at crossings:
   `2+2` = 4-way ┼ at (148,76); `1+2` = bottom-only vertical + T-⌐ (no up arm);
   `1+1` = plain horizontal.
-- **Quarters**: 8px uppercase title + timestamp top-right; content = two
+- **Quarters**: 16px PixelOperator title (same face as halves) + one global
+  refresh time at the screen top-right; content = two
   remaining% + reset lines (deepseek keeps the 16px balance headline + window badge).
 - **Halves**: same panel style as stack (16px labels, bars, per-cell `note_x`).
 
