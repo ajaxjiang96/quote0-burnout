@@ -239,5 +239,20 @@ class ProviderConfiguredTests(unittest.TestCase):
             self.assertEqual(providers.configured_providers(), ["codex", "deepseek", "opencode"])
 
 
+class LayoutNormalizeTests(unittest.TestCase):
+    """display._normalize_layout: validation + fallback (no network)."""
+
+    def test_valid_modes_pass_through(self):
+        for raw, expected in (
+            ("auto", "auto"), ("stack", "stack"), ("1+1", "1+1"),
+            ("1+2", "1+2"), ("2+2", "2+2"), ("AUTO", "auto"), (" 2+2 ", "2+2"),
+        ):
+            self.assertEqual(display._normalize_layout(raw), expected, raw)
+
+    def test_invalid_falls_back_to_auto(self):
+        for raw in ("bogus", "3+3", None, ""):
+            self.assertEqual(display._normalize_layout(raw), "auto", raw)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -123,8 +123,8 @@ def build_snapshot(layout: str | None = None) -> dict:
     opencode panels overlaid. Cache writes are best-effort.
 
     layout: None → LAYOUT env (default auto). The snapshot carries the
-    resolved layout, the configured-provider list, and a per-provider
-    updated_at stamp (%H:%M) that the grid engine renders in cell corners.
+    resolved layout, the configured-provider list, and the global refresh
+    time (updated_at) that the grid engine renders at the screen top-right.
     """
     layout = layout if layout is not None else _normalize_layout(LAYOUT_ENV)
     now = datetime.now().strftime("%H:%M")
@@ -137,8 +137,6 @@ def build_snapshot(layout: str | None = None) -> dict:
     claude_sn = build_claude_snapshot(claude)
     deepseek_sn = build_deepseek_snapshot(deepseek)
     opencode_sn = build_opencode_snapshot(opencode)
-    for p_sn in (codex_sn, claude_sn, deepseek_sn, opencode_sn):
-        p_sn["updated_at"] = now
     snap = {
         "codex": codex_sn,
         "claude": claude_sn,
@@ -146,6 +144,8 @@ def build_snapshot(layout: str | None = None) -> dict:
         "opencode": opencode_sn,
         "second_panel": _resolve_second_panel(deepseek_sn, opencode_sn),
         "layout": layout,
+        # reserved for the #10 panel-order work — the grid engine
+        # currently selects cells by live ok flags, not by this list.
         "configured": configured_providers(),
         "updated_at": now,
         "_cached": False,
