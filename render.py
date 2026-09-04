@@ -528,9 +528,9 @@ def _q_line(lbl, used, reset) -> str:
     """One quarter content line. A missing/unknown reset is elided — the
     APIs can return None (e.g. codex long_reset) and printing the Python
     repr on the e-ink screen is the bug the guard exists for."""
-    if lbl == "RESET":
-        # codex reset row: 'RESET 1 · 29d' (credits · reset-credit expiry)
-        return f"RESET {reset}"
+    if lbl == "Reset":
+        # codex reset row: 'Reset 1 · 29d' (credits · reset-credit expiry)
+        return f"Reset {reset}"
     if used is None:
         return f"{lbl} ?"
     reset = reset if reset and reset != "?" else ""
@@ -540,7 +540,7 @@ def _q_line(lbl, used, reset) -> str:
 def _reset_note(sn: dict) -> str | None:
     """Codex extra row: manual reset credits + the reset credit's expiry.
 
-    Values only ('1 · 29d') — the row's own label carries the RESET wording.
+    Values only ('1 · 29d') — the row's own label carries the Reset wording.
     The expiry is the CREDIT's (from wham/rate-limit-reset-credits), not any
     usage window's reset. None when the API returned neither (only codex has
     reset credits, so claude/others naturally get None)."""
@@ -556,11 +556,11 @@ def _reset_note(sn: dict) -> str | None:
 
 def _draw_reset_row(draw, y, note, note_font, label_font, note_x,
                     row_h=PANEL_ROW_H, bar_h=BAR_H):
-    """Bar-less RESET row: 16px label + 8px note, same pitch and right edge
+    """Bar-less Reset row: 16px label + 8px note, same pitch and right edge
     as the usage rows so the panel reads as one unit."""
     bar_y = y + (row_h - bar_h) // 2
-    _, lh = _tsize(draw, "RESET", label_font)
-    draw.text((PAD, bar_y + (bar_h - lh) // 2), "RESET", font=label_font, fill=BLACK)
+    _, lh = _tsize(draw, "Reset", label_font)
+    draw.text((PAD, bar_y + (bar_h - lh) // 2), "Reset", font=label_font, fill=BLACK)
     nw, nh = _tsize(draw, note, note_font)
     draw.text((note_x, bar_y + (bar_h - nh) // 2), note, font=note_font, fill=BLACK)
     return y + row_h
@@ -579,7 +579,7 @@ def _draw_cell(img, draw, name, sn, cell, reserve_ts=0):
                 # third row at the same 16px face as the window lines (the
                 # compressed 15px pitch, like opencode's Mo row) — not a
                 # smaller note line.
-                rows = rows + [("RESET", None, note)]
+                rows = rows + [("Reset", None, note)]
             _q_lines(draw, cell, rows)
         elif name == "opencode":
             _q_lines(draw, cell, _opencode_rows(sn))
