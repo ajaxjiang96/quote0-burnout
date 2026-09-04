@@ -584,14 +584,23 @@ def _draw_cell(img, draw, name, sn, cell, reserve_ts=0):
                 draw, row_y, row[0], row[1], row[2],
                 small, label, n_x, row_h=PANEL_ROW_H, bar_h=BAR_H)
     elif name == "deepseek":
+        # Hero tier: balance + tier badge on one 21px row (VCR, native face
+        # like the quarter's headline), then a single 8px info row — the
+        # countdown → next tier on the left, the in/out prices on the right.
+        # (The old design crammed the balance inline with the 16px title and
+        # left a dead band in the middle of the half panel.)
         sym = sn.get("symbol", "$")
-        bal = _balance_text(sn)
-        dw, _ = _tsize(draw, _TITLE_BY_NAME.get(name, name.upper()), label)
-        draw.text((LABEL_X + dw + 6, y_top), bal, font=label, fill=BLACK)
+        bal = _clip_text(draw, _balance_text(sn), _vcr(), cell.w - 2 * PAD)
+        draw.text((cell.x0 + PAD, cell.y0 + 24), bal, font=_vcr(), fill=BLACK)
         win = sn.get("window")
         if win:
-            lines = [f"next {sn.get('next_window', '?')} in {sn.get('countdown', '?')}"
-                     if sn.get("countdown") else f"window {win}"]
+            bw, _ = _tsize(draw, win, _vcr())
+            draw.text((cell.x0 + cell.w - PAD - bw, cell.y0 + 26), win,
+                      font=_vcr(), fill=BLACK)
+            if sn.get("countdown") and sn.get("next_window"):
+                left = f"{sn['countdown']} → {sn['next_window']}"
+            else:
+                left = f"window {win}"
             p_in = _price_text(sym, sn.get("price_in"))
             p_out = _price_text(sym, sn.get("price_out"))
             parts = []
@@ -599,13 +608,13 @@ def _draw_cell(img, draw, name, sn, cell, reserve_ts=0):
                 parts.append(f"in {p_in}")
             if p_out is not None:
                 parts.append(f"out {p_out}")
-            if parts:
-                lines.append(" ".join(parts))
-            vy = y_top + 40
-            for line in lines:
-                line = _clip_text(draw, line, small, cell.w - 2 * PAD - LABEL_X)
-                draw.text((LABEL_X, vy), line, font=small, fill=BLACK)
-                vy += 14
+            right = " ".join(parts)
+            rw = _tsize(draw, right, small)[0] if right else 0
+            left = _clip_text(draw, left, small, cell.w - 2 * PAD - rw - 8)
+            draw.text((cell.x0 + PAD, cell.y0 + 60), left, font=small, fill=BLACK)
+            if right:
+                draw.text((cell.x0 + cell.w - PAD - rw, cell.y0 + 60), right,
+                          font=small, fill=BLACK)
 
 
 def _half_row_y(cell, y_top, n_rows) -> int:

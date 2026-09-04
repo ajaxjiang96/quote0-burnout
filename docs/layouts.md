@@ -20,7 +20,7 @@ Quote/0 屏幕 **296×152、黑白 1-bit**，由 `render.py` 渲染。布局引�
 ### ½ 面板
 
 - **Codex / Claude**：logo + 16px 标题，两行 16px 行（5h / Week）带点阵进度条，行块底部对齐（单行面板与双行面板底边齐平）
-- **DeepSeek**：logo + 标题 + 16px 余额，两行 8px：`next PEAK in 2h40m` / `in ¥1.50 out ¥4.50`
+- **DeepSeek**：logo + 16px 标题；**hero 行** = VCR 21px 余额（左）+ 档位徽章 `OFF`/`PEAK`（右）；8px 信息行：`1h50m → PEAK`（左）/ `in ¥1.50 out ¥4.50`（右）
 - **OpenCode**：5h / Wk / Mo 三行
 
 ### ¼ 格
