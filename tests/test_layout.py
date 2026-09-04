@@ -254,12 +254,26 @@ class CachedTimestampTests(unittest.TestCase):
         img = Image.open(io.BytesIO(png))
         self.assertEqual(img.size, (296, 152))
         px = img.load()
-        ts_left = min(x for x in range(248, 296)
-                      for y in range(4, 16) if px[x, y] < 128)
-        title_right = max(x for x in range(174, 254)
-                          for y in range(2, 18) if px[x, y] < 128)
+        # Strip edge the renderer reserves (right-aligned 8px ts at W-PAD,
+        # reserve = tsw) — recomputed from the code's own rule, not a scan.
+        strip_left = render.W - render.PAD - render._tsize(
+            render.ImageDraw.Draw(img), "16:40*", render._pixel())[0]
+        # Title ink is measured in its bottom rows only (y≥13): the 8px ts
+        # ink stops at y=12, so that band is title-only across ALL x — a
+        # title leak past the strip is caught by title_right itself, never
+        # clamped away. Scanning the ts in the shared rows (6-12) instead
+        # caught title ink at x≈248 and compared the title with itself.
+        title_right = max(x for x in range(174, render.W)
+                          for y in range(13, 18) if px[x, y] < 128)
+        ts_zone = [x for x in range(strip_left, render.W)
+                   for y in range(2, 18) if px[x, y] < 128]
+        self.assertTrue(ts_zone, "refresh-time strip must be present")
+        ts_left = min(ts_zone)
         self.assertLess(title_right, ts_left,
                         "top-right quarter title must end before the ts ink")
+        self.assertGreater(max(ts_zone), render.W - render.PAD - 8,
+                           "ts must stay flush right — a misplaced strip "
+                           "would move the collision out of this scan")
         # the fixture must genuinely stress the boundary; if metrics shrink
         # the title this test silently goes vacuous again
         self.assertGreater(title_right, ts_left - 10)
