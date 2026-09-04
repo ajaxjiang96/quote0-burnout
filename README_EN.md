@@ -1,43 +1,36 @@
 # quote0-burnout
 
-AI usage dashboard for MindReset Quote/0 e-ink display — OpenAI Codex + Claude.
+AI usage dashboard for MindReset Quote/0 e-ink display — OpenAI Codex + Claude + DeepSeek + OpenCode Go, rendered at 296×152 in 1-bit B&W and pushed to the device.
 
 [中文](README.md)
 
 ![Device photo](docs/preview.jpg)
-![Example render](docs/example.png)
 
-## Layout
+## Layouts
 
-```
-                        16:40
-◆ CODEX
-5h  [████████████░░░░░] 89%  4h41m
-Week [████████████░░░░░░] 69%  5d23h
-─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─
-◆ CLAUDE
-5h  [████████████░░░░░] 42%  2h13m
-Week [████████░░░░░░░░] 61%  3d4h
-─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─
-◆ DEEPSEEK   $18.42        OFF $0.22 1h50m
-```
+`auto` (default) fits the number of working providers; `--layout` / `LAYOUT` pins one:
 
-- **Codex / Claude**: matched-size dual-row panels (5h / Week) with inline dot-grid bars. Shows remaining% + reset countdown.
-- **DeepSeek**: compact one-line panel — balance + current peak/off-peak billing tier (PEAK/OFF) with countdown to the next tier switch. Official rate card (2026-08); off-peak = 50% of peak.
-- **Second panel** (DeepSeek or OpenCode Go — `SECOND_PANEL=auto` prefers OpenCode): OpenCode Zen "Go" subscription usage ($12/5h, $30/wk, $60/mo) with 5h/Week usage + reset countdown.
-- **Layouts**: `--layout {auto,stack,1+1,1+2,2+2}` (or `LAYOUT` env). auto fits the working-provider count (ok=True: 2→1+1, 3→1+2, ≥4→2+2; providers failing auth/timeout are hidden, shrinking the layout); `1+2` = half on top + two quarter cells below; `2+2` = four cells, with one global refresh time at the top-right of the screen.
-- **Icons**: Codex and Claude both use 16×16 monochrome PNGs; Claude is an e-ink binary version of the Claude symbol.
-- **Fonts**: PixelOperator 16px / Minecraftia 8px.
-- Codex data via direct OAuth API — **no CLI dependency**.
-- Claude data follows CodexBar's Claude Code OAuth usage API. Tokens are read from env, `~/.claude/.credentials.json`, or macOS Keychain, with `claude /usage` as a fallback.
+| `stack` full-width stack | `1+1` two halves | `1+2` half + 2 quarters | `2+2` four cells |
+|---|---|---|---|
+| ![stack](docs/images/layout-stack.png) | ![1+1](docs/images/layout-1x1.png) | ![1+2](docs/images/layout-1x2.png) | ![2+2](docs/images/layout-2x2.png) |
 
-> Full design spec, API reference, and rendering details in [`skill/`](skill/).
+> Full spec — cell contracts, seams, fonts, panel ordering, the cached `*` marker — in [docs/layouts.md](docs/layouts.md).
+
+## Features
+
+- **Codex / Claude**: matched dual-row panels (5h / Week) with dot-grid bars, remaining% + reset countdown
+- **DeepSeek**: big balance + peak/off-peak billing tier (PEAK/OFF, official rate card 2026-08; off-peak = 50% of peak) + countdown to the next tier switch
+- **OpenCode Go**: Zen "Go" subscription usage (5h / Wk / Mo)
+- **Ordering**: the provider whose data changed most recently gets the most visible slot; providers failing auth/timeout are hidden
+- **Cache fallback**: when the Codex API is down the last snapshot is served, marked `16:40*` (`*` = cached)
+- **Pixel fonts**: PixelOperator 16px / Minecraftia 8px / VCR OSD 21px, all native sizes — scaling a pixel font destroys the glyphs
+- **No CLI dependency**: Codex talks to the OpenAI OAuth API directly; Claude uses CodexBar's Claude Code OAuth usage API
 
 ## Install
 
 ```bash
 pip install -r requirements.txt
-codex   # one-time authentication
+# codex CLI for one-time auth: codex
 ```
 
 ## Configure
@@ -50,38 +43,42 @@ cp config.example.env .env
 |----------|----------|-------------|
 | `QUOTE0_API_KEY` | ✓ | Quote/0 API key |
 | `QUOTE0_DEVICE_ID` | ✓ | Device ID |
-| `CODEX_ACCESS_TOKEN` | | Override Codex token (default: ~/.codex/auth.json) |
-| `CLAUDE_ACCESS_TOKEN` | | Override Claude token (default: ~/.claude/.credentials.json or macOS Keychain; fallback: `claude /usage`) |
+| `CODEX_ACCESS_TOKEN` | | Override Codex token (default: `~/.codex/auth.json`) |
+| `CLAUDE_ACCESS_TOKEN` | | Override Claude token (default: `~/.claude/.credentials.json` or macOS Keychain; fallback: `claude /usage`) |
+| `DEEPSEEK_API_KEY` | | DeepSeek balance + rate card (`DEEPSEEK_MODEL` picks the pricing model) |
+| `OPENCODE_GO_API_KEY` | | OpenCode Zen usage API |
+| `LAYOUT` | | `auto` (default) / `stack` / `1+1` / `1+2` / `2+2` |
 
 ## Usage
 
 ```bash
-python display.py --preview   # local preview
-python display.py             # push to device
-python display.py --check     # self-check
+python display.py --preview    # local preview PNG (no push)
+python display.py              # push to device
+python display.py --layout 2+2 # pin a layout (overrides LAYOUT env)
+python display.py --text       # Text API
+python display.py --debug-json # print snapshot JSON
+python display.py --check      # self-check
+python display.py --list-tasks # list task slots
 ```
 
-## Scheduling (macOS launchd)
+## Scheduling (macOS launchd, every 5 min)
 
 ```bash
-cp scripts/com.ajax.quote0-burnout.plist.example ~/Library/LaunchAgents/
+cp com.ajax.quote0-burnout.plist.example ~/Library/LaunchAgents/
 # edit the Program path, then:
 launchctl load ~/Library/LaunchAgents/com.ajax.quote0-burnout.plist
 ```
 
-Runs every 5 minutes.
-
 ## Troubleshooting
 
-```bash
-python display.py --check
-```
-
-- **Codex "no auth"** — run `codex` to re-authenticate
-- **Claude "no auth"** — run `claude` to re-authenticate, confirm macOS Keychain access, or set `CLAUDE_ACCESS_TOKEN`
+- **Codex / Claude "no auth"** — run `codex` / `claude` to re-authenticate
 - **Push 404** — delete and re-add the IMAGE_API card in Dot. App Content Studio
 - **Schedule not updating** — `launchctl kickstart gui/$(id -u)/com.ajax.quote0-burnout`
 
-## Skill
+## Development
 
-This repo includes [skill/SKILL.md](skill/SKILL.md) following the [Vercel Skills](https://github.com/nousresearch/hermes-agent) standard. Drop it into your Hermes Agent skills directory for AI-assisted dashboard development.
+- `providers/`: provider implementations (fetch → snapshot → text)
+- `render.py`: layout engine + rendering; `scripts/render_layout_gallery.py` regenerates the images above
+- Tests: `.venv/bin/python -m unittest discover -s tests`
+- Pixel-level design spec: [skill/references/eink-design.md](skill/references/eink-design.md)
+- This repo ships [skill/SKILL.md](skill/SKILL.md) (Vercel Skills standard) — drop it into Hermes Agent for AI-assisted development
