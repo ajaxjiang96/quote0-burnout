@@ -409,7 +409,12 @@ def _draw_seams(draw, layout):
     y = CELL_H
     if layout == "2+2":
         _hdash(draw, y, 0, W)
-        _vdash(draw, CELL_W, 0, H)
+        # Re-phase the vertical dashes at the junction, as the 1+2 bottom
+        # row does: the crossing's 2px arms are too short to bridge a 4px
+        # gap, so a 0-anchored phase leaves a 1px hole under the junction
+        # (rows 70-75 dash, gap 76-79: row 79 white).
+        _vdash(draw, CELL_W, 0, y)
+        _vdash(draw, CELL_W, y, H)
         _junction(draw, CELL_W, y, ("l", "r", "u", "d"))  # ┼
     elif layout == "1+2":
         _hdash(draw, y, 0, W)
@@ -525,6 +530,7 @@ def _draw_cell(img, draw, name, sn, cell, reserve_ts=0):
             bal = f"{sym}{sn.get('balance', 0):.2f}" if sn.get("balance") is not None else "?"
             # balance = PRIMARY value of the cell: VCR 21px (native face,
             # same as the pre-#1 stack design), badge below at 16px
+            bal = _clip_text(draw, bal, _vcr(), cell.w - 2 * PAD)
             draw.text((cell.x0 + PAD, cell.y0 + 26), bal, font=_vcr(), fill=BLACK)
             win = sn.get("window")
             if win:

@@ -106,7 +106,9 @@ class GridRenderTests(unittest.TestCase):
 
     def test_2x2_junction_is_4way_plus(self):
         img = self._render(_full_snap("2+2"))
-        for pt in ((148, 76), (146, 76), (150, 76), (148, 74), (148, 78)):
+        # (148, 78) ends the junction's 2px d-arm; (148, 79) pins the
+        # re-phased dash below — a 0-anchored phase left a 1px hole there.
+        for pt in ((148, 76), (146, 76), (150, 76), (148, 74), (148, 78), (148, 79)):
             self.assertTrue(_dark(img, *pt), f"{pt} should be dark (junction)")
 
     def test_1x2_seams_and_bottom_t_junction(self):
