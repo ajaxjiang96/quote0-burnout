@@ -115,6 +115,28 @@ class PlanLayoutTests(unittest.TestCase):
             self.assertEqual(jobs, [])
 
 
+class DeepSeekHalfTests(unittest.TestCase):
+    """½-tier DeepSeek hero layout: VCR balance + tier badge, one info row."""
+
+    def _render(self):
+        snap = _full_snap("1+1", live=["codex", "deepseek"])
+        return Image.open(io.BytesIO(render_image(snap)))
+
+    def test_hero_row_balance_left_badge_right(self):
+        px = self._render().load()
+        # hero band = balance (left) + tier badge (right), VCR 21px
+        left = sum(1 for x in range(8, 90) for y in range(96, 126) if px[x, y] < 128)
+        self.assertGreater(left, 20, "balance hero should paint the left band")
+        right = sum(1 for x in range(240, 288) for y in range(96, 126) if px[x, y] < 128)
+        self.assertGreater(right, 10, "tier badge should sit at the right edge")
+
+    def test_info_row_paints_both_sides(self):
+        px = self._render().load()
+        # 16px info row: countdown » next tier (left) + in/out prices (right)
+        ink = sum(1 for x in range(8, 296) for y in range(126, 146) if px[x, y] < 128)
+        self.assertGreater(ink, 30, "info row should paint")
+
+
 class GridRenderTests(unittest.TestCase):
     def _render(self, snap):
         png = render_image(snap)

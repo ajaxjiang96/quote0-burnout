@@ -561,7 +561,10 @@ def _draw_cell(img, draw, name, sn, cell, reserve_ts=0):
         return
 
     # ── half tier ─────────────────────────────────────────────────────────
-    y_top = cell.y0 + PANEL_Y
+    # DeepSeek lifts its header 4px so the 21px hero + 16px info row both
+    # fit the 76px cell; the usage halves keep the shared PANEL_Y row so
+    # their headers line up with each other.
+    y_top = cell.y0 + (8 if name == "deepseek" else PANEL_Y)
     logo = _LOGO_BY_NAME.get(name)
     if logo is not None:
         _logo_paste(img, logo, cell.x0 + PAD, y_top)
@@ -584,14 +587,28 @@ def _draw_cell(img, draw, name, sn, cell, reserve_ts=0):
                 draw, row_y, row[0], row[1], row[2],
                 small, label, n_x, row_h=PANEL_ROW_H, bar_h=BAR_H)
     elif name == "deepseek":
+        # Hero tier: balance + tier badge on one 21px row (VCR, native face
+        # like the quarter's headline), then one 16px info row — the
+        # countdown → next tier on the left, the in/out prices on the right.
+        # The header is lifted 4px (see y_top above) so cap-height text
+        # clears the hero without a dead band. (The old design crammed the
+        # balance inline with the title and left a dead middle band.)
         sym = sn.get("symbol", "$")
-        bal = _balance_text(sn)
-        dw, _ = _tsize(draw, _TITLE_BY_NAME.get(name, name.upper()), label)
-        draw.text((LABEL_X + dw + 6, y_top), bal, font=label, fill=BLACK)
+        bal = _clip_text(draw, _balance_text(sn), _vcr(), cell.w - 2 * PAD)
+        # Same anchor as the badge — both VCR strings share the bbox metrics
+        # ((0,4,…,19)), so equal anchors = perfectly aligned baselines.
+        draw.text((cell.x0 + PAD, cell.y0 + 24), bal, font=_vcr(), fill=BLACK)
         win = sn.get("window")
         if win:
-            lines = [f"next {sn.get('next_window', '?')} in {sn.get('countdown', '?')}"
-                     if sn.get("countdown") else f"window {win}"]
+            bw, _ = _tsize(draw, win, _vcr())
+            draw.text((cell.x0 + cell.w - PAD - bw, cell.y0 + 24), win,
+                      font=_vcr(), fill=BLACK)
+            if sn.get("countdown") and sn.get("next_window"):
+                # » is the transition glyph — PixelOperator has no real →
+                # (it renders as a tofu box; Minecraftia's 8px → is fine).
+                left = f"{sn['countdown']} » {sn['next_window']}"
+            else:
+                left = f"window {win}"
             p_in = _price_text(sym, sn.get("price_in"))
             p_out = _price_text(sym, sn.get("price_out"))
             parts = []
@@ -599,13 +616,13 @@ def _draw_cell(img, draw, name, sn, cell, reserve_ts=0):
                 parts.append(f"in {p_in}")
             if p_out is not None:
                 parts.append(f"out {p_out}")
-            if parts:
-                lines.append(" ".join(parts))
-            vy = y_top + 40
-            for line in lines:
-                line = _clip_text(draw, line, small, cell.w - 2 * PAD - LABEL_X)
-                draw.text((LABEL_X, vy), line, font=small, fill=BLACK)
-                vy += 14
+            right = " ".join(parts)
+            rw = _tsize(draw, right, label)[0] if right else 0
+            left = _clip_text(draw, left, label, cell.w - 2 * PAD - rw - 8)
+            draw.text((cell.x0 + PAD, cell.y0 + 48), left, font=label, fill=BLACK)
+            if right:
+                draw.text((cell.x0 + cell.w - PAD - rw, cell.y0 + 48), right,
+                          font=label, fill=BLACK)
 
 
 def _half_row_y(cell, y_top, n_rows) -> int:
