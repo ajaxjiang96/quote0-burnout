@@ -169,6 +169,28 @@ def _window_rows(sn: dict):
     ]
 
 
+def _opencode_rows(sn: dict) -> list:
+    """OpenCode 5h/Wk/Mo rows — same collector for stack, halves, quarters."""
+    rows = []
+    for lbl, key in (("5h", "rolling"), ("Wk", "weekly"), ("Mo", "monthly")):
+        w = sn.get(key) or {}
+        if w.get("used_percent") is not None:
+            rows.append((lbl, w["used_percent"], w.get("reset", "?")))
+    return rows
+
+
+def _balance_text(sn: dict) -> str:
+    """DeepSeek balance with symbol, or '?' when the API didn't return one."""
+    sym = sn.get("symbol", "$")
+    bal = sn.get("balance")
+    return f"{sym}{bal:.2f}" if bal is not None else "?"
+
+
+def _price_text(sym: str, v):
+    """Price string with symbol, or None when the API didn't return one."""
+    return f"{sym}{v:.2f}" if v is not None else None
+
+
 def _render_v5(img: Image.Image, draw: ImageDraw.ImageDraw, snap: dict):
     cx = snap.get("codex", {})
     cl = snap.get("claude", {})
@@ -205,11 +227,7 @@ def _render_v5(img: Image.Image, draw: ImageDraw.ImageDraw, snap: dict):
         """OpenCode Go full tier: header + 5h/Wk/Mo rows with equal-width bars."""
         _logo(logo_img, y)
         draw.text((LABEL_X, y), title, font=label, fill=BLACK)
-        rows = []
-        for lbl, key in (("5h", "rolling"), ("Wk", "weekly"), ("Mo", "monthly")):
-            w = sn.get(key) or {}
-            if w.get("used_percent") is not None:
-                rows.append((lbl, w["used_percent"], w.get("reset", "?")))
+        rows = _opencode_rows(sn)
         note_w = []
         for _, used, reset in rows:
             _, nw = _usage_note(draw, used, reset, small)
@@ -226,11 +244,7 @@ def _render_v5(img: Image.Image, draw: ImageDraw.ImageDraw, snap: dict):
         """OpenCode Go compact tier: title line + note line when crowded."""
         _logo(logo_img, y)
         draw.text((LABEL_X, y), title, font=label, fill=BLACK)
-        bits = []
-        for lbl, key in (("5h", "rolling"), ("Wk", "weekly"), ("Mo", "monthly")):
-            w = sn.get(key) or {}
-            if w.get("used_percent") is not None:
-                bits.append(f"{lbl} {w['used_percent']}% {w.get('reset', '?')}")
+        bits = [f"{lbl} {used}% {reset}" for lbl, used, reset in _opencode_rows(sn)]
         note = "  ".join(bits) or sn.get("status", "error")
         draw.text((LABEL_X, y + PANEL_HEADER_H), note, font=small, fill=BLACK)
         _, nh = _tsize(draw, note, small)
@@ -240,17 +254,16 @@ def _render_v5(img: Image.Image, draw: ImageDraw.ImageDraw, snap: dict):
         """DeepSeek balance tier: balance + peak/off-peak badge on one line."""
         _logo(logo_img, y)
         draw.text((LABEL_X, y), title, font=label, fill=BLACK)
-        bal = sn.get("balance")
         sym = sn.get("symbol", "$")
-        bal_text = f"{sym}{bal:.2f}" if bal is not None else "?"
+        bal_text = _balance_text(sn)
         dw, _ = _tsize(draw, title, label)
         draw.text((LABEL_X + dw + 6, y), bal_text, font=label, fill=BLACK)
         _, bh = _tsize(draw, bal_text, label)
 
         win = sn.get("window")
-        p_in = sn.get("price_in")
+        p_in = _price_text(sym, sn.get("price_in"))
         if win and p_in is not None:
-            badge = f"{win} {sym}{p_in:.2f}"
+            badge = f"{win} {p_in}"
             cd = sn.get("countdown")
             if cd:
                 badge += f" {cd}"
@@ -324,7 +337,7 @@ def _render_v5(img: Image.Image, draw: ImageDraw.ImageDraw, snap: dict):
 # Screen = 2 rows × 76px. ½ panel = one full-width row (296×76); ¼ cell = 148×76.
 
 CELL_W, CELL_H = 148, 76
-CELL_PAD = 6
+_TS_STRIP_SAFE = 26  # 8px '16:40' measures ≈26px — narrower strips can't reach the TR title
 
 
 @dataclass(frozen=True)
@@ -332,23 +345,22 @@ class _Cell:
     x0: int
     y0: int
     w: int
-    h: int
     kind: str  # "half" | "q"
 
 
 LAYOUTS = {
     # 1+1: two stacked full-width halves
-    "1+1": [_Cell(0, 0, 296, 76, "half"), _Cell(0, 76, 296, 76, "half")],
+    "1+1": [_Cell(0, 0, 296, "half"), _Cell(0, 76, 296, "half")],
     # 1+2: half on TOP + two quarters on the BOTTOM
     "1+2": [
-        _Cell(0, 0, 296, 76, "half"),
-        _Cell(0, 76, 148, 76, "q"),
-        _Cell(148, 76, 148, 76, "q"),
+        _Cell(0, 0, 296, "half"),
+        _Cell(0, 76, 148, "q"),
+        _Cell(148, 76, 148, "q"),
     ],
     # 2+2: four quarter cells
     "2+2": [
-        _Cell(0, 0, 148, 76, "q"), _Cell(148, 0, 148, 76, "q"),
-        _Cell(0, 76, 148, 76, "q"), _Cell(148, 76, 148, 76, "q"),
+        _Cell(0, 0, 148, "q"), _Cell(148, 0, 148, "q"),
+        _Cell(0, 76, 148, "q"), _Cell(148, 76, 148, "q"),
     ],
 }
 
@@ -436,10 +448,10 @@ def _resolve_auto(snapshot) -> str:
 
 
 def _select_panels(snapshot, live, n) -> list[str]:
-    """Pick n providers: primaries (codex, claude) first, then secondaries
-    (deepseek, opencode). When only one secondary slot is left, the
-    second_panel preference arbitrates; a compatible auto layout never
-    needs arbitration because slots fit the secondaries' count."""
+    """Pick n providers: primaries (codex, claude) first, then secondaries.
+    When one slot fits, opencode is preferred over deepseek — the
+    SECOND_PANEL preference was retired; slot ordering by recency is
+    tracked in issue #10."""
     primaries = [p for p in ("codex", "claude") if p in live]
     secondaries = [p for p in ("deepseek", "opencode") if p in live]
     chosen = list(primaries[:n])
@@ -447,9 +459,7 @@ def _select_panels(snapshot, live, n) -> list[str]:
     if room >= len(secondaries):
         chosen += secondaries
     elif room > 0:
-        pref = snapshot.get("second_panel")
-        pick = pref if pref in secondaries else (
-            "opencode" if "opencode" in secondaries else secondaries[0])
+        pick = "opencode" if "opencode" in secondaries else secondaries[0]
         chosen.append(pick)
     return chosen[:n]
 
@@ -486,24 +496,40 @@ def _q_title(img, draw, name, cell, reserve_ts=0):
         _logo_paste(img, logo, cell.x0 + PAD, cell.y0 + 2)
     title = _TITLE_BY_NAME.get(name, name.upper())
     if reserve_ts:
-        title = _clip_text(draw, title, _op(), cell.w - PAD - reserve_ts - LOGO_W - LOGO_GAP)
+        # Title starts at cell.x0+LABEL_X and must end before the ts strip's
+        # left edge (W - PAD - reserve_ts) — that bound is the exact gap.
+        max_w = (W - PAD - reserve_ts) - (cell.x0 + LABEL_X)
+        title = _clip_text(draw, title, _op(), max_w)
     draw.text((cell.x0 + LABEL_X, cell.y0 + 2), title, font=_op(), fill=BLACK)
 
 
 def _q_lines(draw, cell, rows):
-    """Two content lines from (label, used, reset) rows — remaining%.
+    """Content lines from (label, used, reset) rows — remaining%.
 
+    Two rows breathe at a 24px pitch; opencode's third (5h/Wk/Mo all show)
+    compresses to 15px so the monthly tier stays visible in the cell.
     Face: PixelOperator at its NATIVE 16px (pixel grid — scaling a pixel
     font breaks glyphs, e.g. the '.'; see the 12px regressions). Same face
     as half-tier labels; widest string 'Week 59% 123h3m' measured 105px
-    against the 136px content width of a 148px cell."""
+    against the 128px content width of a 148px cell."""
     qfont = _op()
     y = cell.y0 + 26
-    for lbl, used, reset in rows[:2]:
-        line = f"{lbl} {100 - used:.0f}% {reset}" if used is not None else f"{lbl} ?"
+    pitch = 24 if len(rows) <= 2 else 15
+    for lbl, used, reset in rows:
+        line = _q_line(lbl, used, reset)
         line = _clip_text(draw, line, qfont, cell.w - 2 * PAD)
         draw.text((cell.x0 + PAD, y), line, font=qfont, fill=BLACK)
-        y += 24
+        y += pitch
+
+
+def _q_line(lbl, used, reset) -> str:
+    """One quarter content line. A missing/unknown reset is elided — the
+    APIs can return None (e.g. codex long_reset) and printing the Python
+    repr on the e-ink screen is the bug the guard exists for."""
+    if used is None:
+        return f"{lbl} ?"
+    reset = reset if reset and reset != "?" else ""
+    return f"{lbl} {100 - used:.0f}% {reset}".strip()
 
 
 def _draw_cell(img, draw, name, sn, cell, reserve_ts=0):
@@ -512,30 +538,22 @@ def _draw_cell(img, draw, name, sn, cell, reserve_ts=0):
 
     if cell.kind == "q":
         _q_title(img, draw, name, cell, reserve_ts)
-        if not sn.get("ok"):
-            status = _clip_text(draw, sn.get("raw_status", "error"), small, cell.w - 2 * CELL_PAD)
-            draw.text((cell.x0 + CELL_PAD, cell.y0 + 24), status, font=small, fill=BLACK)
-            return
         if name in ("codex", "claude"):
             _q_lines(draw, cell, _window_rows(sn))
         elif name == "opencode":
-            rows = []
-            for lbl, key in (("5h", "rolling"), ("Wk", "weekly"), ("Mo", "monthly")):
-                w = sn.get(key) or {}
-                if w.get("used_percent") is not None:
-                    rows.append((lbl, w["used_percent"], w.get("reset", "?")))
-            _q_lines(draw, cell, rows)
+            _q_lines(draw, cell, _opencode_rows(sn))
         elif name == "deepseek":
             sym = sn.get("symbol", "$")
-            bal = f"{sym}{sn.get('balance', 0):.2f}" if sn.get("balance") is not None else "?"
+            bal = _balance_text(sn)
             # balance = PRIMARY value of the cell: VCR 21px (native face,
             # same as the pre-#1 stack design), badge below at 16px
             bal = _clip_text(draw, bal, _vcr(), cell.w - 2 * PAD)
             draw.text((cell.x0 + PAD, cell.y0 + 26), bal, font=_vcr(), fill=BLACK)
             win = sn.get("window")
+            price_in = _price_text(sym, sn.get("price_in"))
             if win:
                 extra = f" {sn.get('countdown', '')}" if sn.get("countdown") else ""
-                badge = f"{win} {sym}{sn.get('price_in', 0):.2f}{extra}"
+                badge = f"{win} {price_in}{extra}" if price_in is not None else f"{win}{extra}"
                 badge = _clip_text(draw, badge, label, cell.w - 2 * PAD)
                 draw.text((cell.x0 + PAD, cell.y0 + 48), badge, font=label, fill=BLACK)
         return
@@ -547,48 +565,56 @@ def _draw_cell(img, draw, name, sn, cell, reserve_ts=0):
         _logo_paste(img, logo, cell.x0 + PAD, y_top)
     draw.text((LABEL_X, y_top), _TITLE_BY_NAME.get(name, name.upper()), font=label, fill=BLACK)
 
-    if not sn.get("ok"):
-        status = _clip_text(draw, sn.get("raw_status", "error"), small, cell.w - 2 * PAD - LABEL_X)
-        draw.text((LABEL_X, y_top + 24), status, font=small, fill=BLACK)
-        return
-
     if name in ("codex", "claude"):
         rows = _window_rows(sn)
         n_x = _cell_note_x(draw, rows, small)
-        # bottom-anchor the row block: a 1-row panel hangs at the same
-        # seam-adjacent level as a 2-row one (no floating dead space)
-        row_y = max(y_top + PANEL_HEADER_H, cell.y0 + 62 - PANEL_ROW_H * len(rows))
+        row_y = _half_row_y(cell, y_top, len(rows))
         for row in rows:
             row_y = _draw_usage_row(
                 draw, row_y, row[0], row[1], row[2],
                 small, label, n_x, row_h=PANEL_ROW_H, bar_h=BAR_H)
     elif name == "opencode":
-        rows = []
-        for lbl, key in (("5h", "rolling"), ("Wk", "weekly"), ("Mo", "monthly")):
-            w = sn.get(key) or {}
-            if w.get("used_percent") is not None:
-                rows.append((lbl, w["used_percent"], w.get("reset", "?")))
+        rows = _opencode_rows(sn)
         n_x = _cell_note_x(draw, rows, small)
-        row_y = max(y_top + PANEL_HEADER_H, cell.y0 + 62 - PANEL_ROW_H * len(rows))
+        row_y = _half_row_y(cell, y_top, len(rows))
         for row in rows:
             row_y = _draw_usage_row(
                 draw, row_y, row[0], row[1], row[2],
                 small, label, n_x, row_h=PANEL_ROW_H, bar_h=BAR_H)
     elif name == "deepseek":
         sym = sn.get("symbol", "$")
-        bal = f"{sym}{sn.get('balance', 0):.2f}" if sn.get("balance") is not None else "?"
+        bal = _balance_text(sn)
         dw, _ = _tsize(draw, _TITLE_BY_NAME.get(name, name.upper()), label)
         draw.text((LABEL_X + dw + 6, y_top), bal, font=label, fill=BLACK)
         win = sn.get("window")
         if win:
             lines = [f"next {sn.get('next_window', '?')} in {sn.get('countdown', '?')}"
-                     if sn.get("countdown") else f"window {win}",
-                     f"in {sym}{sn.get('price_in', 0):.2f} out {sym}{sn.get('price_out', 0):.2f}"]
+                     if sn.get("countdown") else f"window {win}"]
+            p_in = _price_text(sym, sn.get("price_in"))
+            p_out = _price_text(sym, sn.get("price_out"))
+            parts = []
+            if p_in is not None:
+                parts.append(f"in {p_in}")
+            if p_out is not None:
+                parts.append(f"out {p_out}")
+            if parts:
+                lines.append(" ".join(parts))
             vy = y_top + 40
             for line in lines:
                 line = _clip_text(draw, line, small, cell.w - 2 * PAD - LABEL_X)
                 draw.text((LABEL_X, vy), line, font=small, fill=BLACK)
                 vy += 14
+
+
+def _half_row_y(cell, y_top, n_rows) -> int:
+    """Row-block baseline: bottom-anchor so a 1-row panel hangs at the same
+    seam-adjacent level as a 2-row one (no floating dead space), but clamp
+    so the last row's ink stays off the screen border in the bottom half.
+    The 16px label ink ends one pixel inside its pitch, so the block itself
+    ends 3px short of the cell bottom — without the clamp, opencode's 3-row
+    block lands flush against the screen edge."""
+    row_y = max(y_top + PANEL_HEADER_H, cell.y0 + 62 - PANEL_ROW_H * n_rows)
+    return min(row_y, cell.y0 + CELL_H - PANEL_ROW_H * n_rows - 3)
 
 
 def _grid_ts(snap) -> str:
@@ -602,20 +628,21 @@ def _grid_ts(snap) -> str:
     return ts
 
 
-def _render_grid(img: Image.Image, draw: ImageDraw.ImageDraw, snap: dict, layout: str):
+def _render_grid(img: Image.Image, draw: ImageDraw.ImageDraw, snap: dict):
     mode, jobs = _plan_layout(snap)
     if mode == "stack":
         _render_v5(img, draw, snap)
         return
     _draw_seams(draw, mode)
-    # One global refresh time, top-right — cells don't duplicate it.
-    # The top-right quarter cell's header row shares this line: reserve
-    # the ts strip there (cached ts is wider than the title it meets).
+    # One global refresh time, top-right — cells don't duplicate it. The
+    # top-right quarter's header row shares this line: when the ts is wide
+    # (cached '*'), its title is clipped to the strip's left edge (see
+    # _q_title) so the two can never collide.
     ts = _grid_ts(snap)
     reserve = 0
     if ts:
         tsw, _ = _tsize(draw, ts, _pixel())
-        reserve = tsw if tsw > 26 else 0  # 26px = '16:40' (no collision risk below)
+        reserve = tsw if tsw > _TS_STRIP_SAFE else 0
         draw.text((W - PAD - tsw, 4), ts, font=_pixel(), fill=BLACK)
     for name, cell in jobs:
         _draw_cell(img, draw, name, snap.get(name, {}), cell,
@@ -650,11 +677,11 @@ def render_image(arg, claude_text=None):
     img = Image.new("L", (W, H), WHITE)
     draw = ImageDraw.Draw(img)
     if isinstance(arg, dict):
-        layout = arg.get("layout")
-        if layout in (None, "stack"):
+        mode, _ = _plan_layout(arg)  # validates; unknown/absent → stack
+        if mode == "stack":
             _render_v5(img, draw, arg)
         else:
-            _render_grid(img, draw, arg, layout)
+            _render_grid(img, draw, arg)
     else:
         _render_legacy(draw, arg, claude_text or "?")
     img = img.convert("1", dither=Image.Dither.NONE)
