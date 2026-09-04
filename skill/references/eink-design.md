@@ -14,10 +14,12 @@ Screen = **2 rows × 76px**. A ½ panel = one full-width row (296×76); a ¼ cel
 | `2+2` | four ¼ cells (2×2) |
 | `auto` | fit to providers whose fetch succeeded (ok=True): N=2→1+1, N=3→1+2, N≥4→2+2 (N≤1→stack) |
 
-- `LAYOUT` env or `--layout` CLI override. Snapshot carries `layout` + `configured` (the latter reserved for #10's ordering — selection is live-ok based); absent key → stack.
-- Provider selection: primaries (codex, claude) first, then secondaries (deepseek, opencode).
-  Auto layouts fit the secondaries so `2+2` shows all four; a single secondary slot
-  follows `SECOND_PANEL`.
+- `LAYOUT` env or `--layout` CLI override. Snapshot carries `layout` + `configured` (the latter reserved for #15's provider contract — selection is live-ok based); absent key → stack.
+- Provider order: most-recently-changed first (#10 — `build_snapshot` stamps each provider's
+  last data-change time via fingerprinting against the previous cached snapshot; unchanged
+  providers keep their older stamp and drift back). Ties fall back to canonical order
+  (codex, claude, deepseek, opencode). The first n of that order (live-ok only) fill the
+  cells — top-left is the most visible slot; dead providers are excluded.
 - **Seams**: dashed 6px/4px, with solid 1px junction arms (2px each side) at crossings:
   `2+2` = 4-way ┼ at (148,76); `1+2` = bottom-only vertical + T-⌐ (no up arm);
   `1+1` = plain horizontal.

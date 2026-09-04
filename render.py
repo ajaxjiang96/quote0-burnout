@@ -447,21 +447,23 @@ def _resolve_auto(snapshot) -> str:
     return {0: "stack", 1: "stack", 2: "1+1", 3: "1+2"}.get(n, "2+2")
 
 
-def _select_panels(snapshot, live, n) -> list[str]:
-    """Pick n providers: primaries (codex, claude) first, then secondaries.
-    When one slot fits, opencode is preferred over deepseek — the
-    SECOND_PANEL preference was retired; slot ordering by recency is
-    tracked in issue #10."""
-    primaries = [p for p in ("codex", "claude") if p in live]
-    secondaries = [p for p in ("deepseek", "opencode") if p in live]
-    chosen = list(primaries[:n])
-    room = n - len(chosen)
-    if room >= len(secondaries):
-        chosen += secondaries
-    elif room > 0:
-        pick = "opencode" if "opencode" in secondaries else secondaries[0]
-        chosen.append(pick)
-    return chosen[:n]
+def _order_panels(snapshot, live, n) -> list[str]:
+    """Recency order: most-recently-changed provider first.
+
+    Each provider's updated_at is its LAST DATA-CHANGE time (computed in
+    display.build_snapshot by fingerprinting against the previous cached
+    snapshot; an unchanged provider keeps its older stamp and drifts back
+    in priority). Ties — first run, or several providers changed in the
+    same cycle — fall back to canonical order. The first n live providers
+    fill the layout's cells in order (top-left = most visible)."""
+    return sorted(
+        live,
+        key=lambda p: (
+            snapshot.get(p, {}).get("updated_at", ""),
+            -_PROVIDER_ORDER.index(p),
+        ),
+        reverse=True,
+    )[:n]
 
 
 def _plan_layout(snapshot) -> tuple[str, list]:
@@ -474,7 +476,7 @@ def _plan_layout(snapshot) -> tuple[str, list]:
     if raw not in LAYOUTS:
         return "stack", []
     cells = LAYOUTS[raw]
-    jobs = list(zip(_select_panels(snapshot, _live_providers(snapshot), len(cells)), cells))
+    jobs = list(zip(_order_panels(snapshot, _live_providers(snapshot), len(cells)), cells))
     return raw, jobs
 
 
