@@ -132,8 +132,8 @@ class DeepSeekHalfTests(unittest.TestCase):
 
     def test_info_row_paints_both_sides(self):
         px = self._render().load()
-        # 8px info row: countdown → next tier (left) + in/out prices (right)
-        ink = sum(1 for x in range(8, 296) for y in range(134, 148) if px[x, y] < 128)
+        # 16px info row: countdown » next tier (left) + in/out prices (right)
+        ink = sum(1 for x in range(8, 296) for y in range(126, 146) if px[x, y] < 128)
         self.assertGreater(ink, 30, "info row should paint")
 
 
