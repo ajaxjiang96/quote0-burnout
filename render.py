@@ -528,6 +528,9 @@ def _q_line(lbl, used, reset) -> str:
     """One quarter content line. A missing/unknown reset is elided — the
     APIs can return None (e.g. codex long_reset) and printing the Python
     repr on the e-ink screen is the bug the guard exists for."""
+    if lbl == "RESET":
+        # codex reset row: 'RESET 1 · 5h' (credits · closest window expiry)
+        return f"RESET {reset}"
     if used is None:
         return f"{lbl} ?"
     reset = reset if reset and reset != "?" else ""
@@ -535,17 +538,16 @@ def _q_line(lbl, used, reset) -> str:
 
 
 def _reset_note(sn: dict) -> str | None:
-    """Codex extra line: manual reset credits + the closest window expiry.
+    """Codex extra row: manual reset credits + the closest window expiry.
 
-    '1 reset · 5h' — None when the API returned neither (only codex has
+    Values only ('1 · 5h') — the row's own label carries the RESET wording.
+    None when the API returned neither (only codex has
     rate_limit_reset_credits, so claude/others naturally get None)."""
     n = sn.get("resets_available")
     closest = sn.get("closest_reset")
     if n is None and not closest:
         return None
-    parts = []
-    if n is not None:
-        parts.append(f"{n} reset" if n == 1 else f"{n} resets")
+    parts = [str(n)] if n is not None else []
     if closest:
         parts.append(closest)
     return " · ".join(parts)
@@ -570,11 +572,14 @@ def _draw_cell(img, draw, name, sn, cell, reserve_ts=0):
     if cell.kind == "q":
         _q_title(img, draw, name, cell, reserve_ts)
         if name in ("codex", "claude"):
-            _q_lines(draw, cell, _window_rows(sn))
+            rows = _window_rows(sn)
             note = _reset_note(sn)
             if note:
-                note = _clip_text(draw, note, small, cell.w - 2 * PAD)
-                draw.text((cell.x0 + PAD, cell.y0 + 64), note, font=small, fill=BLACK)
+                # third row at the same 16px face as the window lines (the
+                # compressed 15px pitch, like opencode's Mo row) — not a
+                # smaller note line.
+                rows = rows + [("RESET", None, note)]
+            _q_lines(draw, cell, rows)
         elif name == "opencode":
             _q_lines(draw, cell, _opencode_rows(sn))
         elif name == "deepseek":

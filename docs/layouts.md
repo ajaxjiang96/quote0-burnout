@@ -19,14 +19,14 @@ Quote/0 屏幕 **296×152、黑白 1-bit**，由 `render.py` 渲染。布局引�
 
 ### ½ 面板
 
-- **Codex / Claude**：logo + 16px 标题，两行 16px 行（5h / Week）带点阵进度条，行块底部对齐（单行面板与双行面板底边齐平）。Codex 多一行无进度条的 `RESET` 行（手动重置额度 + 最近窗口过期：`1 reset · 5h`，8px 注释右对齐）
+- **Codex / Claude**：logo + 16px 标题，两行 16px 行（5h / Week）带点阵进度条，行块底部对齐（单行面板与双行面板底边齐平）。Codex 多一行无进度条的 `RESET` 行（同样是 16px 标签 + 右对齐 8px 注释 `1 · 5h`：手动重置额度 + 最近窗口过期）
 - **DeepSeek**：标题行（比其他半屏栏上移 4px）；**hero 行** = VCR 21px 余额（左）+ 档位徽章 `OFF`/`PEAK`（右）；16px 信息行：`1h50m » PEAK`（左，PixelOperator 的 `»` 充当过渡箭头）/ `in ¥1.50 out ¥4.50`（右）
 - **OpenCode**：5h / Wk / Mo 三行
 
 ### ¼ 格
 
 - 头部与半屏栏同一字面和几何：16px logo + 16px 标题（PixelOperator 原生 16px；右上角时间戳较宽时标题会被裁切预留）
-- **Codex / Claude**：两行 16px `标签 剩余% 重置`；Codex 追加一行 8px `1 reset · 5h`（手动重置额度 + 各窗口最近过期时间，跨主窗口与 additional_rate_limits 取 min）
+- **Codex / Claude**：两行 16px `标签 剩余% 重置`；Codex 追加第三行 `RESET 1 · 5h`（同样是 16px，压缩 15px 行距，和 OpenCode 的 Mo 行一致 —— 手动重置额度 + 各窗口最近过期时间，跨主窗口与 additional_rate_limits 取 min）
 - **OpenCode**：三行（5h / Wk / Mo，第三行压缩间距）
 - **DeepSeek**：VCR OSD 21px 余额大字 + 16px 档位徽章（`OFF ¥1.50 1h50m`）
 - **死掉的 provider 不会出现在网格里**（ok=False → 隐藏，而不是画错误单元格）；显式布局的剩余格留白
