@@ -80,6 +80,7 @@ format_claude_text = claude.format_text
 format_deepseek_text = deepseek.format_text
 format_opencode_text = opencode.format_text
 get_codex_usage = codex.get_usage
+get_codex_reset_credits = codex.get_codex_reset_credits
 get_claude_usage = claude.get_usage
 get_deepseek_balance = deepseek.get_balance
 get_opencode_usage = opencode.get_usage
@@ -174,10 +175,11 @@ def build_snapshot(layout: str | None = None) -> dict:
     now_stamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")  # sortable per-provider stamp
 
     codex = get_codex_usage()
+    codex_resets = get_codex_reset_credits()
     claude = get_claude_usage()
     deepseek = get_deepseek_balance()
     opencode = get_opencode_usage()
-    codex_sn = build_codex_snapshot(codex)
+    codex_sn = build_codex_snapshot(codex, reset_credits=codex_resets)
     claude_sn = build_claude_snapshot(claude)
     deepseek_sn = build_deepseek_snapshot(deepseek)
     opencode_sn = build_opencode_snapshot(opencode)

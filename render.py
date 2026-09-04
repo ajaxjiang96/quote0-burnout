@@ -529,7 +529,7 @@ def _q_line(lbl, used, reset) -> str:
     APIs can return None (e.g. codex long_reset) and printing the Python
     repr on the e-ink screen is the bug the guard exists for."""
     if lbl == "RESET":
-        # codex reset row: 'RESET 1 · 5h' (credits · closest window expiry)
+        # codex reset row: 'RESET 1 · 29d' (credits · reset-credit expiry)
         return f"RESET {reset}"
     if used is None:
         return f"{lbl} ?"
@@ -538,18 +538,19 @@ def _q_line(lbl, used, reset) -> str:
 
 
 def _reset_note(sn: dict) -> str | None:
-    """Codex extra row: manual reset credits + the closest window expiry.
+    """Codex extra row: manual reset credits + the reset credit's expiry.
 
-    Values only ('1 · 5h') — the row's own label carries the RESET wording.
-    None when the API returned neither (only codex has
-    rate_limit_reset_credits, so claude/others naturally get None)."""
+    Values only ('1 · 29d') — the row's own label carries the RESET wording.
+    The expiry is the CREDIT's (from wham/rate-limit-reset-credits), not any
+    usage window's reset. None when the API returned neither (only codex has
+    reset credits, so claude/others naturally get None)."""
     n = sn.get("resets_available")
-    closest = sn.get("closest_reset")
-    if n is None and not closest:
+    expiry = sn.get("reset_expiry")
+    if n is None and not expiry:
         return None
     parts = [str(n)] if n is not None else []
-    if closest:
-        parts.append(closest)
+    if expiry:
+        parts.append(expiry)
     return " · ".join(parts)
 
 

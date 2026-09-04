@@ -53,38 +53,40 @@ class CodexSnapshotTests(unittest.TestCase):
         self.assertEqual(sn["long_label"], "Week")
         self.assertEqual(sn["long_used_percent"], 40)
 
-    def test_resets_and_closest_expiry(self):
-        import time
-        now = int(time.time())
-        raw = {
-            "rate_limit": {
-                "primary_window": {"used_percent": 100, "reset_at": now + 3 * 86400,
-                                   "limit_window_seconds": 604800},
-                "secondary_window": None,
-            },
-            "rate_limit_reset_credits": {"available_count": 1, "applicable_available_count": 1},
-            "rate_limit_upsell": {"reset_at": now + 7200, "banner_type": "prolite_rate_limit_reached"},
-            # per-model spinner windows must NOT hijack the expiry (their 5h
-            # tier always looks closest; the user isn't blocked on them)
-            "additional_rate_limits": [{
-                "limit_name": "GPT-5.3-Codex-Spark", "metered_feature": "codex_bengalfox",
-                "rate_limit": {
-                    "primary_window": {"used_percent": 0, "reset_at": now + 3600,
-                                       "limit_window_seconds": 18000},
-                },
-            }],
-        }
-        sn = display.build_codex_snapshot({"ok": True, "raw": raw})
+    def test_reset_credits_endpoint(self):
+        from datetime import datetime, timedelta, timezone
+        now = datetime.now(timezone.utc)
+        # the credit's own expiry (10/4-style), NOT any window's reset_at
+        credits = {"ok": True, "raw": {
+            "available_count": 1,
+            "credits": [
+                {"id": "credit1", "status": "available",
+                 "expires_at": (now + timedelta(days=10)).isoformat()},
+                {"id": "credit2", "status": "redeemed",
+                 "expires_at": (now + timedelta(days=2)).isoformat()},
+            ],
+        }}
+        sn = display.build_codex_snapshot({"ok": True, "raw": {}}, reset_credits=credits)
         self.assertEqual(sn["resets_available"], 1)
-        # expiry = the main limit's reset (upsell's reset_at = 2h), NOT the
-        # spark 5h window's 1h; ±1s at the boundary → '2h' or '1h59m'
-        self.assertIn(sn["closest_reset"], ("2h", "1h59m"))
+        # '10d'/'9d23h' — ±1s wall-clock at the boundary; redeemed credits do
+        # not hijack the min (their 2-day expiry must be ignored)
+        self.assertIn(sn["reset_expiry"], ("10d", "9d23h"))
+
+    def test_reset_credits_failure_falls_back_to_usage_count(self):
+        # credits endpoint down → /usage's count still shown, no expiry
+        raw = {"rate_limit": {"primary_window": {"used_percent": 100}},
+               "rate_limit_reset_credits": {"available_count": 1}}
+        sn = display.build_codex_snapshot(
+            {"ok": True, "raw": raw},
+            reset_credits={"ok": False, "status": "timeout"})
+        self.assertEqual(sn["resets_available"], 1)
+        self.assertIsNone(sn["reset_expiry"])
 
     def test_no_reset_data_is_none(self):
         sn = display.build_codex_snapshot(
             {"ok": True, "raw": {"rate_limit": {"primary_window": {"used_percent": 20}}}})
         self.assertIsNone(sn["resets_available"])
-        self.assertIsNone(sn["closest_reset"])
+        self.assertIsNone(sn["reset_expiry"])
 
 
 class DeepSeekWindowTests(unittest.TestCase):
