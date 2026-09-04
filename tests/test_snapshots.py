@@ -1,8 +1,12 @@
 """Snapshot-builder unit tests for all providers (pure functions, no network)."""
 
 import os
+import sys
 import unittest
 from datetime import datetime, timezone
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))  # repo root for `python tests/test_snapshots.py`
 
 import display
 
@@ -170,10 +174,6 @@ class SecondPanelResolutionTests(unittest.TestCase):
         self.assertEqual(display._resolve_second_panel(self._snap(True), self._snap(True)), "opencode")
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class ProviderConfiguredTests(unittest.TestCase):
     """is_configured() predicates — pure, no network (mock the credential files)."""
 
@@ -192,8 +192,13 @@ class ProviderConfiguredTests(unittest.TestCase):
                 self.assertFalse(cx.is_configured())
         with patch.dict(os.environ, {"CODEX_ACCESS_TOKEN": "tok"}):
             self.assertTrue(cx.is_configured())
-        # file-based (no env) counts as configured
-        self.assertEqual(cx.is_configured(), _P.home().joinpath(".codex/auth.json").exists())
+        # file-based (no env) counts as configured — pin BOTH sides so the
+        # result never depends on the developer's real credentials
+        with patch.dict(os.environ, {}, clear=True):
+            with patch("providers.codex.CODEX_AUTH_PATH", _P(__file__)):  # an existing file
+                self.assertTrue(cx.is_configured())
+            with patch("providers.codex.CODEX_AUTH_PATH", _P("/nonexistent/xyz")):
+                self.assertFalse(cx.is_configured())
 
     def test_claude_env_and_file(self):
         import providers.claude as cl
@@ -232,3 +237,7 @@ class ProviderConfiguredTests(unittest.TestCase):
              patch("providers.deepseek.is_configured", return_value=True), \
              patch("providers.opencode.is_configured", return_value=True):
             self.assertEqual(providers.configured_providers(), ["codex", "deepseek", "opencode"])
+
+
+if __name__ == "__main__":
+    unittest.main()
