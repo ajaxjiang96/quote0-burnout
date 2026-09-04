@@ -471,15 +471,18 @@ def _cell_note_x(draw, rows, small):
     return W - PAD - max(notes) if notes else None
 
 
-def _q_title(img, draw, name, cell):
+def _q_title(img, draw, name, cell, reserve_ts=0):
     """Quarter-cell header: 16px logo + 16px PixelOperator title — identical
     faces AND geometry (PAD / LABEL_X) to the half cards so all panels
-    share one left edge."""
+    share one left edge. reserve_ts (>0) clips the title so it never runs
+    into the global refresh time on the top-right cell's header row."""
     logo = _LOGO_BY_NAME.get(name)
     if logo is not None:
         _logo_paste(img, logo, cell.x0 + PAD, cell.y0 + 2)
-    draw.text((cell.x0 + LABEL_X, cell.y0 + 2),
-              _TITLE_BY_NAME.get(name, name.upper()), font=_op(), fill=BLACK)
+    title = _TITLE_BY_NAME.get(name, name.upper())
+    if reserve_ts:
+        title = _clip_text(draw, title, _op(), cell.w - PAD - reserve_ts - LOGO_W - LOGO_GAP)
+    draw.text((cell.x0 + LABEL_X, cell.y0 + 2), title, font=_op(), fill=BLACK)
 
 
 def _q_lines(draw, cell, rows):
@@ -498,12 +501,12 @@ def _q_lines(draw, cell, rows):
         y += 24
 
 
-def _draw_cell(img, draw, name, sn, cell):
+def _draw_cell(img, draw, name, sn, cell, reserve_ts=0):
     label = _op()
     small = _pixel()
 
     if cell.kind == "q":
-        _q_title(img, draw, name, cell)
+        _q_title(img, draw, name, cell, reserve_ts)
         if not sn.get("ok"):
             status = _clip_text(draw, sn.get("raw_status", "error"), small, cell.w - 2 * CELL_PAD)
             draw.text((cell.x0 + CELL_PAD, cell.y0 + 24), status, font=small, fill=BLACK)
@@ -582,6 +585,17 @@ def _draw_cell(img, draw, name, sn, cell):
                 vy += 14
 
 
+def _grid_ts(snap) -> str:
+    """Grid-mode refresh-time label. A cache fallback sets updated_at to
+    '16:40 (cached)' — too wide for the header strip (it collides with the
+    top-right cell title); shorten to '16:40*' (the '*' stale marker was
+    reserved by #12 anyway)."""
+    ts = snap.get("updated_at", "")
+    if snap.get("_cached") and " " in ts:
+        return ts.split()[0] + "*"
+    return ts
+
+
 def _render_grid(img: Image.Image, draw: ImageDraw.ImageDraw, snap: dict, layout: str):
     mode, jobs = _plan_layout(snap)
     if mode == "stack":
@@ -589,12 +603,17 @@ def _render_grid(img: Image.Image, draw: ImageDraw.ImageDraw, snap: dict, layout
         return
     _draw_seams(draw, mode)
     # One global refresh time, top-right — cells don't duplicate it.
-    ts = snap.get("updated_at", "")
+    # The top-right quarter cell's header row shares this line: reserve
+    # the ts strip there (cached ts is wider than the title it meets).
+    ts = _grid_ts(snap)
+    reserve = 0
     if ts:
         tsw, _ = _tsize(draw, ts, _pixel())
+        reserve = tsw if tsw > 26 else 0  # 26px = '16:40' (no collision risk below)
         draw.text((W - PAD - tsw, 4), ts, font=_pixel(), fill=BLACK)
     for name, cell in jobs:
-        _draw_cell(img, draw, name, snap.get(name, {}), cell)
+        _draw_cell(img, draw, name, snap.get(name, {}), cell,
+                   reserve if (cell.x0 == CELL_W and cell.y0 == 0) else 0)
 
 
 # ── Legacy ────────────────────────────────────────────────────────────────

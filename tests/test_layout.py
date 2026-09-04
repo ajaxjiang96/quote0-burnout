@@ -170,3 +170,23 @@ class GridRenderTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class CachedTimestampTests(unittest.TestCase):
+    def test_short_marker_for_cached_ts(self):
+        self.assertEqual(render._grid_ts({"updated_at": "16:40 (cached)", "_cached": True}), "16:40*")
+        self.assertEqual(render._grid_ts({"updated_at": "16:40", "_cached": False}), "16:40")
+
+    def test_cached_ts_does_not_collide_with_ne_title(self):
+        snap = _full_snap("2+2")
+        snap["_cached"] = True
+        snap["updated_at"] = "16:40 (cached)"
+        png = render_image(snap)
+        img = Image.open(io.BytesIO(png))
+        self.assertEqual(img.size, (296, 152))
+        px = img.load()
+        # the top-right quarter (CLAUDE) title must not run under the ts:
+        # the strip between the title's right edge and the ts is reserved
+        self.assertFalse(
+            any(px[x, y] < 128 for x in range(244, 250) for y in range(2, 18)),
+            "top-right quarter title must not collide with the cached timestamp")
