@@ -77,10 +77,11 @@ launchctl load ~/Library/LaunchAgents/com.ajax.quote0-burnout.plist
 - **Push 404** — delete and re-add the IMAGE_API card in Dot. App Content Studio
 - **Schedule not updating** — `launchctl kickstart gui/$(id -u)/com.ajax.quote0-burnout`
 
-## Development
+## Development & Contributing
 
+- Contributing Guide & Provider Contract: [CONTRIBUTING.md](CONTRIBUTING.md)
 - `providers/`: provider implementations (fetch → snapshot → text)
-- `render.py`: layout engine + rendering; `scripts/render_layout_gallery.py` regenerates the images above
-- Tests: `.venv/bin/python -m unittest discover -s tests`
+- `render.py`: layout engine + rendering; `scripts/render_layout_gallery.py` regenerates preview images
+- Testing: `python3 -m pytest`
 - Pixel-level design spec: [skill/references/eink-design.md](skill/references/eink-design.md)
 - This repo ships [skill/SKILL.md](skill/SKILL.md) (Vercel Skills standard) — drop it into Hermes Agent for AI-assisted development

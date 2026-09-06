@@ -77,10 +77,11 @@ launchctl load ~/Library/LaunchAgents/com.ajax.quote0-burnout.plist
 - **推送 404** —— Dot. App 里删掉 IMAGE_API 卡片重新添加
 - **定时不更新** —— `launchctl kickstart gui/$(id -u)/com.ajax.quote0-burnout`
 
-## 开发
+## 开发与贡献
 
+- 贡献指南与 Provider 标准：[CONTRIBUTING.md](CONTRIBUTING.md)
 - `providers/`：provider 实现（fetch → snapshot → text）
 - `render.py`：布局引擎 + 渲染；`scripts/render_layout_gallery.py` 可重新生成上面的效果图
-- 测试：`.venv/bin/python -m unittest discover -s tests`
+- 测试：`python3 -m pytest`
 - 像素级设计规格：[skill/references/eink-design.md](skill/references/eink-design.md)
 - 本仓库附带 [skill/SKILL.md](skill/SKILL.md)（Vercel Skills 标准），可直接导入 Hermes Agent 使用
