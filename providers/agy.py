@@ -39,15 +39,16 @@ def get_agy_usage() -> dict:
     if not token:
         return {"ok": False, "status": "no key"}
     try:
-        r = requests.get(
-            AGY_USAGE_URL,
-            headers={
-                "Authorization": f"Bearer {token}",
-                "Accept": "application/json",
-                "User-Agent": "quote0-burnout",
-            },
-            timeout=15,
-        )
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "Accept": "application/json",
+            "User-Agent": "quote0-burnout",
+        }
+        if "retrieveUserQuotaSummary" in AGY_USAGE_URL or _env("AGY_METHOD").upper() == "POST":
+            headers["Content-Type"] = "application/json"
+            r = requests.post(AGY_USAGE_URL, headers=headers, json={}, timeout=15)
+        else:
+            r = requests.get(AGY_USAGE_URL, headers=headers, timeout=15)
         r.raise_for_status()
         return {"ok": True, "raw": r.json()}
     except requests.Timeout:

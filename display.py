@@ -486,7 +486,7 @@ def check() -> int:
     print("Codex:")
     auth_ok = False
     try:
-        token, acct = _load_codex_token()
+        token, acct = codex._load_codex_token()
         if token:
             acct_str = f" (acct {acct[:8]}...)" if acct else ""
             print(_status("auth", True, f"token loaded{acct_str}"))
@@ -500,8 +500,8 @@ def check() -> int:
 
     codex_ok = False
     if auth_ok:
-        codex = get_codex_usage()
-        sn_codex = build_codex_snapshot(codex)
+        codex_data = get_codex_usage()
+        sn_codex = build_codex_snapshot(codex_data)
         if sn_codex["ok"]:
             pct = sn_codex["short_used_percent"]
             pct_str = f"{pct}%" if pct is not None else "?"
@@ -547,9 +547,15 @@ def check() -> int:
     # ── Google AGY ──────────────────────────────────────────────────────────
     print("Google AGY:")
     agy_ok = False
-    if AGY_API_KEY:
-        agy = get_agy_usage()
-        sn_agy = build_agy_snapshot(agy)
+    token, src = agy._load_token()
+    if token:
+        print(_status("auth", True, f"token loaded ({src})"))
+    else:
+        print(_status("auth", True, "optional / missing"))
+
+    if agy.is_configured():
+        agy_res = get_agy_usage()
+        sn_agy = build_agy_snapshot(agy_res)
         if sn_agy["ok"]:
             pct = sn_agy["short_used_percent"]
             pct_str = f"{pct}%" if pct is not None else "?"
@@ -566,11 +572,12 @@ def check() -> int:
     # ── Render ─────────────────────────────────────────────────────────────
     print("Render:")
     render_ok = False
-    if codex_ok or claude_ok:
+    if codex_ok or claude_ok or agy_ok:
         try:
             snapshot = {
                 "codex": build_codex_snapshot(get_codex_usage() if codex_ok else {"ok": False, "status": "n/a"}),
                 "claude": build_claude_snapshot(get_claude_usage() if claude_ok else {"ok": False, "status": "n/a"}),
+                "agy": build_agy_snapshot(get_agy_usage() if agy_ok else {"ok": False, "status": "n/a"}),
                 "updated_at": datetime.now().strftime("%H:%M"),
             }
             png = render_image(snapshot)
