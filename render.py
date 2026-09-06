@@ -24,6 +24,7 @@ LOGO_CODEX    = Image.open(Path(__file__).parent / "assets" / "logos" / "codex.p
 LOGO_CLAUDE   = Image.open(Path(__file__).parent / "assets" / "logos" / "claude.png").convert("1")
 LOGO_DEEPSEEK = Image.open(Path(__file__).parent / "assets" / "logos" / "deepseek.png").convert("1")
 LOGO_OPENCODE = Image.open(Path(__file__).parent / "assets" / "logos" / "opencode.png").convert("1")
+LOGO_AGY      = Image.open(Path(__file__).parent / "assets" / "logos" / "agy.png").convert("1")
 LOGO_W = 16
 LOGO_GAP = 4
 LABEL_X = PAD + LOGO_W + LOGO_GAP  # text starts after logo + gap
@@ -368,14 +369,16 @@ LAYOUTS = {
     ],
 }
 
-_PROVIDER_ORDER = ("codex", "claude", "deepseek", "opencode")
+_PROVIDER_ORDER = ("codex", "claude", "deepseek", "opencode", "agy")
 _TITLE_BY_NAME = {
     "codex": "CODEX", "claude": "CLAUDE",
     "deepseek": "DEEPSEEK", "opencode": "OPENCODE-GO",
+    "agy": "GOOGLE AGY",
 }
 _LOGO_BY_NAME = {
     "codex": LOGO_CODEX, "claude": LOGO_CLAUDE,
     "deepseek": LOGO_DEEPSEEK, "opencode": LOGO_OPENCODE,
+    "agy": LOGO_AGY,
 }
 
 
@@ -578,9 +581,9 @@ def _draw_cell(img, draw, name, sn, cell, reserve_ts=0):
 
     if cell.kind == "q":
         _q_title(img, draw, name, cell, reserve_ts, cached=bool(sn.get("_cached")))
-        if name in ("codex", "claude"):
+        if name in ("codex", "claude", "agy"):
             rows = _window_rows(sn)
-            note = _reset_note(sn)
+            note = _reset_note(sn) if name == "codex" else None
             if note:
                 # third row at the same 16px face as the window lines (the
                 # compressed 15px pitch, like opencode's Mo row) — not a
@@ -618,9 +621,9 @@ def _draw_cell(img, draw, name, sn, cell, reserve_ts=0):
         half_title += "*"
     draw.text((LABEL_X, y_top), half_title, font=label, fill=BLACK)
 
-    if name in ("codex", "claude"):
+    if name in ("codex", "claude", "agy"):
         rows = _window_rows(sn)
-        reset_note = _reset_note(sn)
+        reset_note = _reset_note(sn) if name == "codex" else None
         notes_w = [_usage_note(draw, used, reset, small)[1] for _, used, reset in rows]
         if reset_note:
             notes_w.append(_tsize(draw, reset_note, small)[0])
