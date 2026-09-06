@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+import json
+import os
+from pathlib import Path
+
 import requests
 
 from .core import coerce_percent as _coerce_percent
@@ -11,17 +15,34 @@ from .core import time_until as _time_until
 
 AGY_API_KEY   = _env("AGY_API_KEY") or _env("GOOGLE_AGY_API_KEY")
 AGY_USAGE_URL = _env("AGY_USAGE_URL", "https://antigravity.google/api/v1/quota")
+AGY_AUTH_PATH = Path.home() / ".gemini" / "antigravity-cli" / "antigravity-oauth-token"
+
+
+def _load_token() -> str:
+    """Return access token from environment or local AGY CLI OAuth credentials file."""
+    env_token = os.environ.get("AGY_API_KEY") or os.environ.get("GOOGLE_AGY_API_KEY") or AGY_API_KEY
+    if env_token:
+        return env_token.strip()
+    if AGY_AUTH_PATH.exists():
+        try:
+            data = json.loads(AGY_AUTH_PATH.read_text(encoding="utf-8"))
+            tok = data.get("token", {}).get("access_token") or data.get("access_token") or ""
+            return tok.strip()
+        except Exception:
+            return ""
+    return ""
 
 
 def get_agy_usage() -> dict:
     """Fetch Google AGY quota usage (daily and weekly quotas)."""
-    if not AGY_API_KEY:
+    token = _load_token()
+    if not token:
         return {"ok": False, "status": "no key"}
     try:
         r = requests.get(
             AGY_USAGE_URL,
             headers={
-                "Authorization": f"Bearer {AGY_API_KEY}",
+                "Authorization": f"Bearer {token}",
                 "Accept": "application/json",
                 "User-Agent": "quote0-burnout",
             },
@@ -115,4 +136,4 @@ format_text = format_agy_text
 
 
 def is_configured() -> bool:
-    return bool(AGY_API_KEY)
+    return bool(_load_token())

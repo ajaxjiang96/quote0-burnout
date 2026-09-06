@@ -303,6 +303,7 @@ class ProviderConfiguredTests(unittest.TestCase):
         import providers.deepseek as ds
         import providers.opencode as oc
         import providers.agy as agy
+        from pathlib import Path as _P
         from unittest.mock import patch
 
         with patch("providers.deepseek.DEEPSEEK_API_KEY", ""):
@@ -313,9 +314,13 @@ class ProviderConfiguredTests(unittest.TestCase):
             self.assertFalse(oc.is_configured())
         with patch("providers.opencode.OPENCODE_GO_API_KEY", "oc-1"):
             self.assertTrue(oc.is_configured())
-        with patch("providers.agy.AGY_API_KEY", ""):
-            self.assertFalse(agy.is_configured())
-        with patch("providers.agy.AGY_API_KEY", "agy-1"):
+        with patch("providers.agy.AGY_AUTH_PATH", _P("/nonexistent/xyz")), \
+             patch("providers.agy.AGY_API_KEY", ""):
+            with patch.dict(os.environ, {}, clear=False):
+                self._no_env("AGY_API_KEY", "GOOGLE_AGY_API_KEY")
+                self.assertFalse(agy.is_configured())
+        with patch("providers.agy.AGY_AUTH_PATH", _P("/nonexistent/xyz")), \
+             patch.dict(os.environ, {"AGY_API_KEY": "agy-1"}):
             self.assertTrue(agy.is_configured())
 
     def test_registry_order_and_filtering(self):
