@@ -2,10 +2,11 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+    <!-- Set these to YOUR machine's values, then copy to ~/Library/LaunchAgents/ -->
     <key>Label</key>
-    <string>com.ajax.quote0-burnout</string>
+    <string>com.example.quote0-burnout</string>
     <key>Program</key>
-    <string>/Users/ajax/Projects/quote0-burnout/run.sh</string>
+    <string>__YOUR_DEPLOY_DIR__/run.sh</string>
     <key>StartCalendarInterval</key>
     <array>
         <dict><key>Minute</key><integer>0</integer></dict>
