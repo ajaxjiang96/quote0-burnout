@@ -302,15 +302,19 @@ def _render_v5(img: Image.Image, draw: ImageDraw.ImageDraw, snap: dict):
     # (title, logo, snapshot, layer) — layer: usage | windows3 | compact | balance
     panels = []
     if cx_ok:
-        panels.append(("CODEX", LOGO_CODEX, cx, "usage"))
+        t = "CODEX*" if cx.get("_cached") else "CODEX"
+        panels.append((t, LOGO_CODEX, cx, "usage"))
     if cl_ok:
-        panels.append(("CLAUDE", LOGO_CLAUDE, cl, "usage"))
+        t = "CLAUDE*" if cl.get("_cached") else "CLAUDE"
+        panels.append((t, LOGO_CLAUDE, cl, "usage"))
     if second == "opencode":
         layers = ["windows3"] if len(panels) + 1 <= 2 else ["windows3compact"]
+        t = "OPENCODE-GO*" if oc.get("_cached") else "OPENCODE-GO"
         for layer in layers:
-            panels.append(("OPENCODE-GO", LOGO_OPENCODE, oc, layer))
+            panels.append((t, LOGO_OPENCODE, oc, layer))
     elif second == "deepseek":
-        panels.append(("DEEPSEEK", LOGO_DEEPSEEK, ds, "balance"))
+        t = "DEEPSEEK*" if ds.get("_cached") else "DEEPSEEK"
+        panels.append((t, LOGO_DEEPSEEK, ds, "balance"))
 
     if not panels:
         return
@@ -488,7 +492,7 @@ def _cell_note_x(draw, rows, small):
     return W - PAD - max(notes) if notes else None
 
 
-def _q_title(img, draw, name, cell, reserve_ts=0):
+def _q_title(img, draw, name, cell, reserve_ts=0, cached=False):
     """Quarter-cell header: 16px logo + 16px PixelOperator title — identical
     faces AND geometry (PAD / LABEL_X) to the half cards so all panels
     share one left edge. reserve_ts (>0) clips the title so it never runs
@@ -497,6 +501,8 @@ def _q_title(img, draw, name, cell, reserve_ts=0):
     if logo is not None:
         _logo_paste(img, logo, cell.x0 + PAD, cell.y0 + 2)
     title = _TITLE_BY_NAME.get(name, name.upper())
+    if cached:
+        title += "*"
     if reserve_ts:
         # Title starts at cell.x0+LABEL_X and must end before the ts strip's
         # left edge (W - PAD - reserve_ts) — that bound is the exact gap.
@@ -571,7 +577,7 @@ def _draw_cell(img, draw, name, sn, cell, reserve_ts=0):
     small = _pixel()
 
     if cell.kind == "q":
-        _q_title(img, draw, name, cell, reserve_ts)
+        _q_title(img, draw, name, cell, reserve_ts, cached=bool(sn.get("_cached")))
         if name in ("codex", "claude"):
             rows = _window_rows(sn)
             note = _reset_note(sn)
@@ -607,7 +613,10 @@ def _draw_cell(img, draw, name, sn, cell, reserve_ts=0):
     logo = _LOGO_BY_NAME.get(name)
     if logo is not None:
         _logo_paste(img, logo, cell.x0 + PAD, y_top)
-    draw.text((LABEL_X, y_top), _TITLE_BY_NAME.get(name, name.upper()), font=label, fill=BLACK)
+    half_title = _TITLE_BY_NAME.get(name, name.upper())
+    if sn.get("_cached"):
+        half_title += "*"
+    draw.text((LABEL_X, y_top), half_title, font=label, fill=BLACK)
 
     if name in ("codex", "claude"):
         rows = _window_rows(sn)

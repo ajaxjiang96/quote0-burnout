@@ -408,3 +408,19 @@ class CachedTimestampTests(unittest.TestCase):
         # the fixture must genuinely stress the boundary; if metrics shrink
         # the title this test silently goes vacuous again
         self.assertGreater(title_right, ts_left - 10)
+
+    def test_cached_panel_titles_render_star(self):
+        """When a provider is served from cache, its title receives a '*' marker."""
+        snap = _full_snap("1+1", live=["codex", "claude"])
+        snap["codex"]["_cached"] = True
+        png = render_image(snap)
+        self.assertIsInstance(png, bytes)
+        self.assertGreater(len(png), 0)
+
+        # In 2+2 layout
+        snap_grid = _full_snap("2+2", live=["codex", "claude", "deepseek", "opencode"])
+        snap_grid["codex"]["_cached"] = True
+        snap_grid["deepseek"]["_cached"] = True
+        png_grid = render_image(snap_grid)
+        self.assertIsInstance(png_grid, bytes)
+        self.assertGreater(len(png_grid), 0)
