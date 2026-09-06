@@ -335,5 +335,30 @@ class ProviderTimestampTests(unittest.TestCase):
         self.assertEqual(changed["updated_at"], "2026-09-04 09:30:00")
 
 
+class IntervalParserTests(unittest.TestCase):
+    def test_parse_interval_valid_units(self):
+        self.assertEqual(display.parse_interval(60), 60)
+        self.assertEqual(display.parse_interval("60"), 60)
+        self.assertEqual(display.parse_interval("90s"), 90)
+        self.assertEqual(display.parse_interval("5m"), 300)
+        self.assertEqual(display.parse_interval("1h"), 3600)
+
+    def test_parse_interval_minimum_enforced(self):
+        with self.assertRaises(ValueError):
+            display.parse_interval(30)
+        with self.assertRaises(ValueError):
+            display.parse_interval("59s")
+        with self.assertRaises(ValueError):
+            display.parse_interval("0m")
+
+    def test_parse_interval_none_or_empty(self):
+        self.assertIsNone(display.parse_interval(None))
+        self.assertIsNone(display.parse_interval(""))
+
+    def test_parse_interval_invalid(self):
+        with self.assertRaises(ValueError):
+            display.parse_interval("invalid")
+
+
 if __name__ == "__main__":
     unittest.main()
