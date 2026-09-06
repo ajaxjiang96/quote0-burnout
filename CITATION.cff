@@ -1,0 +1,23 @@
+cff-version: 1.2.0
+message: "If you use this software or reference it in your work, please cite it as below."
+title: "quote0-burnout: AI Usage & Rate-Limit Dashboard for MindReset Quote/0 E-Ink Display"
+abstract: "A minimal, pixel-perfect e-ink usage dashboard for MindReset Quote/0 (296x152, 1-bit monochrome) monitoring OpenAI Codex, Claude Code, Google Antigravity (AGY), DeepSeek, and OpenCode quotas and rate limits."
+authors:
+  - family-names: "Jiang"
+    given-names: "Jiacheng"
+    alias: "ajax"
+version: 1.0.0
+date-released: 2026-09-06
+license: MIT
+repository-code: "https://github.com/ajaxjiang96/quote0-burnout"
+keywords:
+  - "mindreset"
+  - "quote0"
+  - "e-ink"
+  - "epaper"
+  - "rate-limit"
+  - "codex"
+  - "claude-code"
+  - "antigravity"
+  - "deepseek"
+  - "dashboard"

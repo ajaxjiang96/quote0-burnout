@@ -1,8 +1,15 @@
 # quote0-burnout
 
-AI usage dashboard for MindReset Quote/0 e-ink display — OpenAI Codex + Claude + DeepSeek + OpenCode Go, rendered at 296×152 in 1-bit B&W and pushed to the device.
+[![Python](https://img.shields.io/badge/Python-3.10+-3776AB.svg?logo=python&logoColor=white)](https://www.python.org/)
+[![Hardware](https://img.shields.io/badge/Hardware-MindReset%20Quote%2F0-FF6B00.svg)](https://mindreset.tech/)
+[![Display](https://img.shields.io/badge/Display-296%C3%97152%201--bit%20E--Ink-000000.svg)](docs/layouts.md)
+[![Tests](https://img.shields.io/badge/Tests-98%20passed-brightgreen.svg)](tests/)
+[![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![LLM Context](https://img.shields.io/badge/LLMs.txt-Standard-purple.svg)](llms.txt)
 
-[中文](README.md)
+AI usage & rate-limit dashboard for MindReset Quote/0 e-ink display — OpenAI Codex + Claude Code + Google Antigravity (AGY) + DeepSeek + OpenCode Go, rendered at 296×152 in pure 1-bit B&W and pushed directly to the device.
+
+[中文](README.md) · [LLMs.txt](llms.txt) · [Full Layout Spec](docs/layouts.md)
 
 ![Device photo](docs/preview.jpg)
 
@@ -18,13 +25,15 @@ AI usage dashboard for MindReset Quote/0 e-ink display — OpenAI Codex + Claude
 
 ## Features
 
-- **Codex / Claude**: matched dual-row panels (5h / Week) with dot-grid bars, remaining% + reset countdown
-- **DeepSeek**: big balance + peak/off-peak billing tier (PEAK/OFF, official rate card 2026-08; off-peak = 50% of peak) + countdown to the next tier switch
+- **Google AGY (Antigravity)**: 5h and weekly quota usage fetched via `agy --print /quota`, automatic remaining% conversion, reset countdowns, and official 16×16 bitmap arch logo
+- **OpenAI Codex / Claude Code**: matched dual-row panels (5h / Week) with dot-grid bars, remaining% + reset countdown, plus Codex manual reset credits & expiry
+- **DeepSeek**: hero balance (VCR 21px) + peak/off-peak billing tier (PEAK/OFF, official rate card 2026-08; off-peak = 50% discount) + countdown to the next tier switch
 - **OpenCode Go**: Zen "Go" subscription usage (5h / Wk / Mo)
-- **Ordering**: the provider whose data changed most recently gets the most visible slot; providers failing auth/timeout are hidden
-- **Cache fallback**: when the Codex API is down the last snapshot is served, marked `16:40*` (`*` = cached)
-- **Pixel fonts**: PixelOperator 16px / Minecraftia 8px / VCR OSD 21px, all native sizes — scaling a pixel font destroys the glyphs
-- **No CLI dependency**: Codex talks to the OpenAI OAuth API directly; Claude uses CodexBar's Claude Code OAuth usage API
+- **Dynamic Auto-Layout**: automatically selects `stack`, `1+1`, `1+2`, or `2+2` based on the count of active live providers
+- **Recency-Based Ordering**: the provider whose data changed most recently gets the most prominent slot; unauthenticated or dead providers are silently hidden
+- **Fail-Safe Cache Fallback**: when an upstream provider API experiences downtime, the last valid snapshot is displayed, tagged `*` in the title (e.g. `16:40*`)
+- **Pixel-Perfect Typography**: PixelOperator 16px / Minecraftia 8px / VCR OSD 21px, rendered strictly at native bitmap sizes with zero anti-aliasing blur
+- **Flexible Execution Modes**: supports single-shot push, local preview (`--preview`), self-scheduling loop (`--interval 5m`), macOS launchd daemon, and Docker deployment
 
 ## Install
 
@@ -47,7 +56,7 @@ cp config.example.env .env
 | `CLAUDE_ACCESS_TOKEN` | | Override Claude token (default: `~/.claude/.credentials.json` or macOS Keychain; fallback: `claude /usage`) |
 | `DEEPSEEK_API_KEY` | | DeepSeek balance + rate card (`DEEPSEEK_MODEL` picks the pricing model) |
 | `OPENCODE_GO_API_KEY` | | OpenCode Zen usage API |
-| `AGY_API_KEY` | | Google AGY (Antigravity) quota API key |
+| `AGY_API_KEY` | | Google AGY (Antigravity) quota API key (auto-discovers local `~/.gemini/antigravity-cli/`) |
 | `LAYOUT` | | `auto` (default) / `stack` / `1+1` / `1+2` / `2+2` |
 | `REFRESH_INTERVAL` | | self-scheduling loop interval (e.g. `60`, `5m`, `1h`; min 60s) |
 
@@ -71,6 +80,27 @@ cp com.ajax.quote0-burnout.plist.example ~/Library/LaunchAgents/
 # edit the Program path, then:
 launchctl load ~/Library/LaunchAgents/com.ajax.quote0-burnout.plist
 ```
+
+## Frequently Asked Questions (FAQ)
+
+### Q: Which AI providers are supported?
+`quote0-burnout` natively integrates with 5 major platforms:
+1. **OpenAI Codex** (direct OAuth API / Codex CLI)
+2. **Claude Code** (Anthropic Claude Code OAuth / `claude /usage` CLI fallback)
+3. **Google Antigravity** (`agy` CLI slash command)
+4. **DeepSeek** (official platform balance and dynamic rate card)
+5. **OpenCode** (Zen "Go" subscription windows)
+
+### Q: Why pure 1-bit monochrome without grayscale anti-aliasing?
+The MindReset Quote/0 utilizes a 296×152 electronic paper display. Grayscale dithering introduces artifacts, ghosting, and blurry character edges at small sizes. By enforcing native pixel-font rendering (PixelOperator 16px, Minecraftia 8px, VCR 21px) with 1-bit dot rasterization, every character and progress bar remains ultra-sharp with maximum contrast.
+
+### Q: What happens if an API token expires or an upstream service times out?
+The system employs **failure isolation and silent omission**: unconfigured or failed providers are hidden from view, and the screen automatically reflows into the optimal geometry for the remaining healthy providers (e.g. 1+2 automatically reflows to 1+1). For transient network drops, cached data is served with a `*` marker instead of displaying error screens.
+
+### Q: How do I run it automatically in the background?
+- **macOS**: Load the `launchd` plist (executes `run.sh` every 5 minutes).
+- **In-process daemon**: Run `python display.py --interval 5m` (includes a 60-second safety floor).
+- **Docker**: Deploy with the provided `Dockerfile` and `docker-compose.yml`.
 
 ## Troubleshooting
 

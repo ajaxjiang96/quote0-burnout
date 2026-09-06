@@ -1,0 +1,63 @@
+# quote0-burnout
+
+> AI usage & rate-limit dashboard for MindReset Quote/0 e-ink display (296×152 1-bit monochrome). Real-time monitoring for OpenAI Codex, Claude Code, Google Antigravity (AGY), DeepSeek, and OpenCode Go.
+
+## Overview
+
+`quote0-burnout` is a Python-based utility that fetches quota, rate limit, and balance usage across leading AI development providers, normalizes the data into standardized snapshots, renders a pixel-perfect 1-bit monochrome bitmap at native 296×152 resolution, and pushes it to the MindReset Quote/0 electronic paper device via the Quote/0 Image or Text API.
+
+- **Target Hardware**: MindReset Quote/0 Electronic Paper Display (296×152 px, pure black-and-white 1-bit).
+- **Core Principle**: Zero anti-aliasing; native pixel-rendered typography (PixelOperator 16px, Minecraftia 8px, VCR OSD Mono 21px).
+- **Adaptive Layout**: Auto-adapts layout based on active live providers (`stack`, `1+1`, `1+2`, `2+2`).
+- **Recency Ordering**: Dynamically promotes the most recently updated provider to the primary slot.
+- **Fail-Safe Cache**: Renders cached snapshots marked with `*` when an upstream provider API experiences downtime.
+
+## Supported Providers
+
+- **OpenAI Codex**: 5h and weekly quota usage via direct OAuth token; displays remaining %, reset countdown, and available reset credits with expiry.
+- **Claude Code (Anthropic)**: 5h and 7-day usage windows via OAuth credentials or `claude /usage` CLI fallback.
+- **Google AGY (Antigravity)**: 5h and weekly quota tracking via `agy --print /quota` CLI or API override; calculates `used% = 100 - remaining%`.
+- **DeepSeek**: Real-time account balance with peak/off-peak billing status (PEAK / OFF, 50% discount during off-peak) and switch countdown.
+- **OpenCode**: Zen "Go" subscription windows (5h / Week / Month).
+
+## Quick CLI Reference
+
+```bash
+# Preview image locally without pushing to hardware
+python display.py --preview
+
+# Push current snapshot to Quote/0 device
+python display.py
+
+# Continuous self-scheduling loop (e.g. 5m, 1h; minimum 60s)
+python display.py --interval 5m
+
+# Force a specific layout geometry (stack, 1+1, 1+2, 2+2)
+python display.py --layout 1+1
+
+# Output formatted text for Quote/0 Text API
+python display.py --text
+
+# Output snapshot JSON for debugging or external integrations
+python display.py --debug-json
+
+# Run diagnostics and credential checks
+python display.py --check
+```
+
+## Provider Contract Standard
+
+Every provider module under `providers/<name>.py` implements 4 required functions:
+
+1. `is_configured() -> bool`: Returns `True` if credentials (API key, OAuth token file, or CLI) exist.
+2. `get_usage() -> dict`: Returns `{"ok": True, "raw": ...}` or `{"ok": False, "status": "error"}`.
+3. `build_snapshot(data: dict) -> dict`: Normalizes raw response into standardized metrics (`short_label`, `short_used_percent`, `short_reset`, `long_label`, `long_used_percent`, `long_reset`, `status`, `raw_status`).
+4. `format_text(sn: dict) -> str`: Compact one- or two-line summary string for Quote/0 Text API.
+
+## Documentation Links
+
+- [Layout Specification](docs/layouts.md): Coordinate grids, cell contracts, seam rules, and typography.
+- [Contributing Guide](CONTRIBUTING.md): Provider implementation contracts, layout tier constraints, and testing guidelines.
+- [Pixel Design Specs](skill/references/eink-design.md): E-ink rendering constraints and font rasterization rules.
+- [Skill Definition](skill/SKILL.md): Vercel Skills standard definition for AI agent pair programming.
+- [Full LLM Context](llms-full.txt): Aggregated complete documentation and specifications in a single file.

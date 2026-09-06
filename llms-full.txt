@@ -1,0 +1,94 @@
+# quote0-burnout: Full System Specification & Documentation
+
+> Target Audience: Large Language Models, AI Coding Assistants, and Generative Search Engines (ChatGPT, Claude, Perplexity, Gemini, DeepSeek, GitHub Copilot).
+
+---
+
+## 1. Project Purpose & System Architecture
+
+`quote0-burnout` is a lightweight, zero-dependency-bloat Python service designed for the MindReset Quote/0 desktop electronic paper device. It aggregates rate limits, subscription utilization, and API balances from major AI providers and renders them into a pixel-perfect 1-bit black-and-white bitmap (296×152 px).
+
+### Target Device
+- **Hardware**: MindReset Quote/0 E-Ink / E-Paper Display.
+- **Resolution**: Exactly 296 pixels (width) × 152 pixels (height).
+- **Color Mode**: Pure 1-bit monochrome (`mode: '1'`). No grayscale, no dithering, no anti-aliasing.
+- **Push Protocols**:
+  - `IMAGE_API`: Direct PNG upload to device screen via MindReset Open Device API.
+  - `TEXT_API`: Compact textual status lines.
+
+### Core Rendering Pipeline
+1. **Fetch**: Query active providers in parallel/sequence with short timeouts and cache fallbacks.
+2. **Snapshot**: Normalize vendor responses into uniform dictionary schemas (`short_label`, `short_used_percent`, `short_reset`, `long_label`, `long_used_percent`, `long_reset`, `status`).
+3. **Change Detection & Recency Ordering**: Calculate MD5/JSON fingerprints of snapshots against the local cache (`tmp/quote0_snapshot.json`). Providers with newer changes are prioritized in the visual layout hierarchy.
+4. **Layout Resolution**: Determine screen layout (`stack`, `1+1`, `1+2`, or `2+2`) based on the number of live, authenticated providers (`ok: True`). Dead or unauthenticated providers are silently omitted.
+5. **Pixel-Perfect Rendering**: Render bitmap with Pillow using native-size pixel fonts.
+6. **Delivery**: Push payload via HTTPS POST to `https://open.mindreset.tech/api/authV2/open/device/{QUOTE0_DEVICE_ID}/fixed/content`.
+
+---
+
+## 2. Supported AI Providers & Quota Mechanics
+
+### OpenAI Codex
+- **Authentication**: `~/.codex/auth.json` or `CODEX_ACCESS_TOKEN`.
+- **Metrics**: 5-hour limit, weekly limit, reset countdown, and rate-limit reset credits (`resets_available` + `reset_expiry`).
+
+### Claude Code (Anthropic)
+- **Authentication**: `~/.claude/.credentials.json`, macOS Keychain, `CLAUDE_ACCESS_TOKEN`, or CLI fallback (`claude /usage`).
+- **Metrics**: 5-hour session quota and 7-day all-models quota with countdowns.
+
+### Google AGY (Antigravity)
+- **Authentication**: Local token file (`~/.gemini/antigravity-cli/antigravity-oauth-token`), `AGY_API_KEY`, or `agy` CLI binary.
+- **Data Source**: Fetched via `agy --print /quota`. Outputs tab-separated records for Gemini Models and Claude/GPT models.
+- **Normalization**: Translates remaining percentage to utilization: `used_percent = 100 - remaining_percent`.
+
+### DeepSeek
+- **Authentication**: `DEEPSEEK_API_KEY`.
+- **Metrics**: Real-time account balance with hero 21px VCR font, dynamic billing tier (PEAK vs OFF-PEAK, 50% discount), and countdown until the next rate switch.
+
+### OpenCode Go
+- **Authentication**: `OPENCODE_GO_API_KEY`.
+- **Metrics**: Zen "Go" subscription tier: 5h, Weekly, and Monthly utilization bars.
+
+---
+
+## 3. Layout Dimensions & Typography Rules
+
+| Layout Mode | Live Provider Count | Layout Description |
+|---|---|---|
+| `stack` | 1 (or forced) | Full-width single provider view |
+| `1+1` | 2 | Two half-height panels stacked vertically (296×76 px each) |
+| `1+2` | 3 | Top half-width panel (296×76 px) + bottom two quarter cells (148×76 px each) |
+| `2+2` | 4 | Four quarter cells in a 2×2 grid (148×76 px each) |
+
+### Strict Font Constraints
+- **PixelOperator (16px)**: Used for panel titles, labels, percentages, and status tags.
+- **Minecraftia (8px)**: Used for secondary countdown notes, reset stamps, and small badges.
+- **VCR OSD Mono (21px)**: Used exclusively for hero numbers (e.g. DeepSeek account balance).
+- **Rule**: NEVER scale pixel fonts. Only draw at native point sizes to prevent glyph degradation on e-ink screens.
+
+---
+
+## 4. Environment Variables Configuration
+
+| Variable | Required | Default | Purpose |
+|---|---|---|---|
+| `QUOTE0_API_KEY` | Yes | - | MindReset Open Platform API Key |
+| `QUOTE0_DEVICE_ID` | Yes | - | MindReset Quote/0 hardware MAC / device ID |
+| `CODEX_ACCESS_TOKEN` | No | Auto | OpenAI Codex bearer token override |
+| `CLAUDE_ACCESS_TOKEN` | No | Auto | Claude Code OAuth token override |
+| `AGY_API_KEY` | No | Auto | Google Antigravity token override |
+| `DEEPSEEK_API_KEY` | No | - | DeepSeek platform API key |
+| `OPENCODE_GO_API_KEY` | No | - | OpenCode Zen subscription API key |
+| `LAYOUT` | No | `auto` | Force layout geometry: `auto`, `stack`, `1+1`, `1+2`, `2+2` |
+| `REFRESH_INTERVAL` | No | - | Self-scheduling loop period (e.g. `5m`, `60s`, `1h`; min 60s) |
+
+---
+
+## 5. CLI Commands
+
+- `python display.py --preview`: Render preview image locally to `/tmp/quote0_burnout_preview.png`.
+- `python display.py`: Push current live status to Quote/0 e-ink screen.
+- `python display.py --interval 5m`: Run daemon loop refreshing every 5 minutes.
+- `python display.py --check`: Diagnostic self-check verifying auth, APIs, rendering, and device endpoints.
+- `python display.py --debug-json`: Dump normalized snapshot JSON to standard output.
+- `python display.py --text`: Push textual summary instead of monochrome image.

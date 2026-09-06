@@ -1,8 +1,15 @@
 # quote0-burnout
 
-MindReset Quote/0 墨水屏 AI 用量仪表盘 —— OpenAI Codex + Claude + DeepSeek + OpenCode Go 的实时用量。296×152、黑白 1-bit 渲染后推送到设备。
+[![Python](https://img.shields.io/badge/Python-3.10+-3776AB.svg?logo=python&logoColor=white)](https://www.python.org/)
+[![Hardware](https://img.shields.io/badge/Hardware-MindReset%20Quote%2F0-FF6B00.svg)](https://mindreset.tech/)
+[![Display](https://img.shields.io/badge/Display-296%C3%97152%201--bit%20E--Ink-000000.svg)](docs/layouts.md)
+[![Tests](https://img.shields.io/badge/Tests-98%20passed-brightgreen.svg)](tests/)
+[![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![LLM Context](https://img.shields.io/badge/LLMs.txt-Standard-purple.svg)](llms.txt)
 
-[English](README_EN.md)
+MindReset Quote/0 墨水屏 AI 用量与配额仪表盘 —— 实时聚合 OpenAI Codex、Claude Code、Google Antigravity (AGY)、DeepSeek 与 OpenCode Go 的配额、余量与余额。296×152、纯黑白 1-bit 原生点阵渲染并推送到设备。
+
+[English](README_EN.md) · [LLMs.txt](llms.txt) · [完整规格](docs/layouts.md)
 
 ![实机照片](docs/preview.jpg)
 
@@ -18,13 +25,15 @@ MindReset Quote/0 墨水屏 AI 用量仪表盘 —— OpenAI Codex + Claude + De
 
 ## 特性
 
-- **Codex / Claude**：同尺寸双行面板（5h / Week），点阵进度条 + 余量 % + 重置倒计时
-- **DeepSeek**：余额大字 + 峰谷计费档（PEAK/OFF，官方价目 2026-08，谷段 = 峰段 ×0.5）+ 档位切换倒计时
-- **OpenCode Go**：Zen "Go" 订阅用量（5h / Wk / Mo）
-- **面板排序**：数据最近变化的 provider 排最前；鉴权失败/超时的 provider 自动隐藏
-- **缓存兜底**：Codex API 不可用时展示上次快照，右上角时间为 `16:40*`（`*` = 缓存数据）
-- **像素级字体**：PixelOperator 16px / Minecraftia 8px / VCR OSD 21px，全部原生尺寸 —— 缩放像素字体会毁掉字形
-- **零 CLI 依赖**：Codex 直连 OpenAI OAuth API，Claude 走 CodexBar 的 Claude Code OAuth usage API
+- **Google AGY (Antigravity)**：通过 `agy --print /quota` 获取 5 小时与每周配额，自动折算使用百分比与重置倒计时，搭配官方 16×16 反重力拱门点阵 Logo
+- **OpenAI Codex / Claude Code**：同尺寸双行面板（5h / Week），点阵进度条 + 余量 % + 重置倒计时，Codex 支持手动重置额度与到期提示
+- **DeepSeek**：余额大字（VCR 21px）+ 峰谷计费档（PEAK/OFF，官方价目 2026-08，谷段 = 峰段 ×0.5）+ 档位切换倒计时
+- **OpenCode Go**：Zen "Go" 订阅用量三行视图（5h / Wk / Mo）
+- **动态自适应布局**：自动依据当前可用的 Provider 数量匹配 `stack` / `1+1` / `1+2` / `2+2`，无缝填满屏幕
+- **热度优先排序**：数据最近发生变化的 provider 自动排到最显眼位置；鉴权失败或超时的 provider 自动隐藏
+- **高可用缓存兜底**：Provider API 临时不可用时自动展示最近一次有效快照，右上角标记 `*`（如 `16:40*`）
+- **像素级原生排版**：PixelOperator 16px / Minecraftia 8px / VCR OSD 21px，全部原生点阵尺寸绘制，零抗锯齿发虚
+- **多样化运行方式**：支持单次推送、本地预览 (`--preview`)、自调度循环 (`--interval 5m`)、macOS launchd 守护进程以及 Docker 容器化部署
 
 ## 安装
 
@@ -47,7 +56,7 @@ cp config.example.env .env
 | `CLAUDE_ACCESS_TOKEN` | | 覆盖 Claude token（默认 `~/.claude/.credentials.json` 或 macOS Keychain；缺失时 fallback 到 `claude /usage`） |
 | `DEEPSEEK_API_KEY` | | DeepSeek 余额 + 价目（`DEEPSEEK_MODEL` 选计价模型） |
 | `OPENCODE_GO_API_KEY` | | OpenCode Zen 用量 API |
-| `AGY_API_KEY` | | Google AGY (Antigravity) 配额 API key |
+| `AGY_API_KEY` | | Google AGY (Antigravity) 配额 API key（默认自动读取本地 `~/.gemini/antigravity-cli/`） |
 | `LAYOUT` | | `auto`（默认）/ `stack` / `1+1` / `1+2` / `2+2` |
 | `REFRESH_INTERVAL` | | 自调度循环间隔（如 `60`, `5m`, `1h`；最低 60s） |
 
@@ -72,6 +81,27 @@ cp com.ajax.quote0-burnout.plist.example ~/Library/LaunchAgents/
 launchctl load ~/Library/LaunchAgents/com.ajax.quote0-burnout.plist
 ```
 
+## 常见问题（FAQ）
+
+### Q: quote0-burnout 支持哪些 AI 平台与客户端？
+当前原生支持 5 大主流平台：
+1. **OpenAI Codex**（Codex CLI / direct OAuth）
+2. **Claude Code**（Anthropic Claude Code OAuth / `claude /usage` CLI）
+3. **Google Antigravity**（`agy` CLI slash command）
+4. **DeepSeek**（官方开放平台余额与动态阶梯计费）
+5. **OpenCode**（Zen "Go" 订阅用量）
+
+### Q: 墨水屏为什么使用纯黑白 1-bit，不做灰阶抖动？
+MindReset Quote/0 采用 296×152 分辨率黑白电子纸屏。灰阶抖动（Dithering）会在小尺寸字体和点阵进度条边缘产生严重的残影与噪点。本项目严格采用原生像素字体（PixelOperator 16px、Minecraftia 8px、VCR 21px）进行 1-bit 点对点精准栅格化，确保在电子墨水屏上达到最极致的对比度与锐度。
+
+### Q: 某个 Provider 的 Token 过期或网络报错会影响屏幕其他内容吗？
+不会。系统具有**故障隔离机制**与**死节点静默规则**：未配置或超时的 Provider 会自动从屏幕隐藏，剩余活跃 Provider 会自动重组为适应的布局（如 1+2 自动降级为 1+1）。对于临时断网的活跃 Provider，系统会自动提供缓存快照并在标题添加 `*` 标识，绝不在桌面上渲染大面积报错文字。
+
+### Q: 怎样让它在后台静默运行？
+- **macOS**：配置 `launchd` plist 定时任务（推荐每 5 分钟执行一次 `run.sh`）。
+- **进程循环**：直接运行 `python display.py --interval 5m`，自带最小 60 秒保底自调度。
+- **Docker**：使用项目提供的 `Dockerfile` 和 `docker-compose.yml` 容器化部署。
+
 ## 故障排查
 
 - **Codex / Claude 显示 "no auth"** —— 运行 `codex` / `claude` 重新认证
@@ -86,3 +116,4 @@ launchctl load ~/Library/LaunchAgents/com.ajax.quote0-burnout.plist
 - 测试：`python3 -m pytest`
 - 像素级设计规格：[skill/references/eink-design.md](skill/references/eink-design.md)
 - 本仓库附带 [skill/SKILL.md](skill/SKILL.md)（Vercel Skills 标准），可直接导入 Hermes Agent 使用
+
