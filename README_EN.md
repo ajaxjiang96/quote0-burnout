@@ -48,12 +48,14 @@ cp config.example.env .env
 | `DEEPSEEK_API_KEY` | | DeepSeek balance + rate card (`DEEPSEEK_MODEL` picks the pricing model) |
 | `OPENCODE_GO_API_KEY` | | OpenCode Zen usage API |
 | `LAYOUT` | | `auto` (default) / `stack` / `1+1` / `1+2` / `2+2` |
+| `REFRESH_INTERVAL` | | self-scheduling loop interval (e.g. `60`, `5m`, `1h`; min 60s) |
 
 ## Usage
 
 ```bash
 python display.py --preview    # local preview PNG (no push)
 python display.py              # push to device
+python display.py --interval 5m # self-scheduling loop (pushes every 5m, min 60s)
 python display.py --layout 2+2 # pin a layout (overrides LAYOUT env)
 python display.py --text       # Text API
 python display.py --debug-json # print snapshot JSON

@@ -11,6 +11,7 @@ Usage:
   python display.py --list-tasks      # List fixed + loop task slots
   python display.py --list-tasks fixed
   python display.py --list-tasks loop
+  python display.py --interval 5m     # Self-scheduling loop every 5m (min 60s)
 """
 
 from __future__ import annotations
@@ -20,6 +21,7 @@ import base64
 import json
 import os
 import sys
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -49,6 +51,33 @@ SECOND_PANEL = _env("SECOND_PANEL", "auto").strip().lower()
 
 # Layout: auto (fit to configured providers) | stack | 1+1 | 1+2 | 2+2
 LAYOUT_ENV = _env("LAYOUT", "auto").strip().lower()
+
+# Refresh interval: CLI --interval or REFRESH_INTERVAL env (e.g. 60, 5m, 1h). Minimum 60s.
+REFRESH_INTERVAL_ENV = _env("REFRESH_INTERVAL") or _env("INTERVAL")
+
+
+def parse_interval(raw: str | int | float | None) -> int | None:
+    """Parse an interval string (e.g. '60', '90s', '5m', '1h') to seconds.
+    Enforces a sane minimum of 60s to protect provider APIs."""
+    if raw is None:
+        return None
+    if isinstance(raw, (int, float)):
+        sec = int(raw)
+    else:
+        raw_str = str(raw).strip().lower()
+        if not raw_str:
+            return None
+        if raw_str.endswith("s"):
+            sec = int(float(raw_str[:-1]))
+        elif raw_str.endswith("m"):
+            sec = int(float(raw_str[:-1]) * 60)
+        elif raw_str.endswith("h"):
+            sec = int(float(raw_str[:-1]) * 3600)
+        else:
+            sec = int(float(raw_str))
+    if sec < 60:
+        raise ValueError(f"Interval {sec}s is below the minimum allowed (60s)")
+    return sec
 
 
 def _normalize_layout(raw: str) -> str:
@@ -667,6 +696,10 @@ def main():
         choices=["auto", "stack", "1+1", "1+2", "2+2"],
         help="Panel layout: auto (default — fit to configured providers) | stack | 1+1 | 1+2 | 2+2. Overrides LAYOUT env."
     )
+    parser.add_argument(
+        "--interval", default=None, metavar="SECONDS|MINUTES",
+        help="Self-scheduling loop interval (e.g. 60, 60s, 5m, 1h; minimum 60s). Overrides REFRESH_INTERVAL env."
+    )
     args = parser.parse_args()
 
     # ── --check ────────────────────────────────────────────────────────────
@@ -684,9 +717,36 @@ def main():
         ok = debug_json(layout=args.layout)
         sys.exit(0 if ok else 1)
 
-    # ── default / --preview / --text ───────────────────────────────────────
-    success = run(preview=args.preview, text_mode=args.text, layout=args.layout)
-    sys.exit(0 if success else 1)
+    # ── Resolve interval (CLI override > env > None) ────────────────────────
+    raw_interval = args.interval if args.interval is not None else REFRESH_INTERVAL_ENV
+    interval = None
+    if raw_interval is not None:
+        try:
+            interval = parse_interval(raw_interval)
+        except ValueError as e:
+            print(f"Error: invalid --interval: {e}", file=sys.stderr)
+            sys.exit(1)
+
+    # ── default / --preview / --text / loop ─────────────────────────────────
+    if interval is not None:
+        print(f"Starting self-scheduling loop (interval: {interval}s). Press Ctrl+C to stop.")
+        try:
+            while True:
+                start_time = time.time()
+                try:
+                    run(preview=args.preview, text_mode=args.text, layout=args.layout)
+                except Exception as e:
+                    print(f"Error during update cycle: {e}", file=sys.stderr)
+
+                elapsed = time.time() - start_time
+                sleep_sec = max(0.0, interval - elapsed)
+                time.sleep(sleep_sec)
+        except KeyboardInterrupt:
+            print("\nExiting self-scheduling loop.")
+            sys.exit(0)
+    else:
+        success = run(preview=args.preview, text_mode=args.text, layout=args.layout)
+        sys.exit(0 if success else 1)
 
 
 if __name__ == "__main__":

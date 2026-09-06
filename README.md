@@ -48,12 +48,14 @@ cp config.example.env .env
 | `DEEPSEEK_API_KEY` | | DeepSeek 余额 + 价目（`DEEPSEEK_MODEL` 选计价模型） |
 | `OPENCODE_GO_API_KEY` | | OpenCode Zen 用量 API |
 | `LAYOUT` | | `auto`（默认）/ `stack` / `1+1` / `1+2` / `2+2` |
+| `REFRESH_INTERVAL` | | 自调度循环间隔（如 `60`, `5m`, `1h`；最低 60s） |
 
 ## 使用
 
 ```bash
 python display.py --preview    # 本地生成预览 PNG（不推送）
 python display.py              # 推送到设备
+python display.py --interval 5m # 自调度循环（每 5 分钟推送一次，最低 60s）
 python display.py --layout 2+2 # 固定布局，覆盖 LAYOUT 环境变量
 python display.py --text       # Text API
 python display.py --debug-json # 打印快照 JSON
