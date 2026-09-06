@@ -26,20 +26,29 @@ Render and push a 296×152 B&W AI usage dashboard to MindReset Quote/0 devices.
 ## Architecture
 
 ```
-display.py     # CLI entry: fetch → snapshot → render → push
-render.py      # Pillow 296×152 pure B&W PNG
+display.py     # CLI entry: orchestration, scheduling, snapshot cache, push
+render.py      # Pillow 296×152 pure B&W PNG (grid layouts, tiers, fonts)
+providers/     # Standardized provider implementations
+  ├── core.py      # Shared helpers (env, countdowns, status clamping)
+  ├── codex.py     # OpenAI Codex OAuth usage + reset credits
+  ├── claude.py    # Anthropic Claude OAuth / CLI usage
+  ├── deepseek.py  # DeepSeek balance + pricing window
+  └── opencode.py  # OpenCode Go (Zen) flat-rate subscription
 run.sh         # launchd wrapper (sets PATH, sources .env)
 config.example.env
+CONTRIBUTING.md # Provider contract, layout tiers, and testing standards
 ```
 
 ### Data flow
 
-1. `display.py` → `_load_codex_token()` reads `~/.codex/auth.json`
-2. `GET https://chatgpt.com/backend-api/wham/usage` → `rate_limit.primary_window`, `secondary_window`
-3. Claude: `GET https://api.anthropic.com/api/oauth/usage`
-4. `build_snapshot()` → structured dict
-5. `render.py::render_image()` → Pillow → pure B&W PNG
-6. `push_image()` → Quote/0 Image API
+1. `display.py` checks `configured_providers()` across `providers/`
+2. Fetch functions (`get_usage()`) retrieve remote balances/quotas
+3. `build_snapshot()` normalizes into standard provider snapshot dicts
+4. `display.py` compares fingerprints against cache for recency ordering (#10)
+5. `render.py::render_image()` generates the 296×152 1-bit B&W PNG
+6. `push_image()` sends image to Quote/0 Image API
+
+For instructions on adding a new provider, see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Codex Data (Direct OAuth API)
 
