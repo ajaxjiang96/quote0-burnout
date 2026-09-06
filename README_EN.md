@@ -47,6 +47,7 @@ cp config.example.env .env
 | `CLAUDE_ACCESS_TOKEN` | | Override Claude token (default: `~/.claude/.credentials.json` or macOS Keychain; fallback: `claude /usage`) |
 | `DEEPSEEK_API_KEY` | | DeepSeek balance + rate card (`DEEPSEEK_MODEL` picks the pricing model) |
 | `OPENCODE_GO_API_KEY` | | OpenCode Zen usage API |
+| `AGY_API_KEY` | | Google AGY (Antigravity) quota API key |
 | `LAYOUT` | | `auto` (default) / `stack` / `1+1` / `1+2` / `2+2` |
 | `REFRESH_INTERVAL` | | self-scheduling loop interval (e.g. `60`, `5m`, `1h`; min 60s) |
 

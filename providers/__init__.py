@@ -12,11 +12,17 @@ renderer's (render.py) and the layout engine's (roadmap #9); providers only
 own fetch + snapshot + text format.
 """
 
-from . import claude, codex, deepseek, opencode
+from . import agy, claude, codex, deepseek, opencode
 
-PROVIDER_ORDER = ["codex", "claude", "deepseek", "opencode"]
+PROVIDER_ORDER = ["codex", "claude", "deepseek", "opencode", "agy"]
 
-_MODULES = {"codex": codex, "claude": claude, "deepseek": deepseek, "opencode": opencode}
+_MODULES = {
+    "codex": codex,
+    "claude": claude,
+    "deepseek": deepseek,
+    "opencode": opencode,
+    "agy": agy,
+}
 
 
 def configured_providers() -> list[str]:

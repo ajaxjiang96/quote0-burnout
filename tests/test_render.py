@@ -47,6 +47,14 @@ def _deepseek(ok=True):
             "ends_in": 6600, "countdown": "1h50m", "next_window": "PEAK"}
 
 
+def _agy(ok=True):
+    if not ok:
+        return {"ok": False, "status": "error", "raw_status": "no key"}
+    return {"ok": True, "short_label": "Day", "short_used_percent": 35,
+            "short_reset": "4h12m", "long_label": "Week",
+            "long_used_percent": 60, "long_reset": "3d4h", "status": "ok"}
+
+
 class RenderSmokeTests(unittest.TestCase):
     def _render(self, snap):
         png = render_image(snap)
@@ -74,6 +82,27 @@ class RenderSmokeTests(unittest.TestCase):
                 "deepseek": _deepseek(), "opencode": _opencode(),
                 "second_panel": "deepseek", "updated_at": "13:30"}
         self._render(snap)
+
+    def test_agy_render_in_grid_and_half(self):
+        # 1+1 with codex and agy
+        snap_half = {
+            "layout": "1+1",
+            "codex": _codex(),
+            "agy": _agy(),
+            "updated_at": "14:00",
+        }
+        self._render(snap_half)
+
+        # 2+2 with all 4
+        snap_grid = {
+            "layout": "2+2",
+            "codex": _codex(),
+            "claude": _claude(ok=True),
+            "deepseek": _deepseek(),
+            "agy": _agy(),
+            "updated_at": "14:00",
+        }
+        self._render(snap_grid)
 
     def test_only_codex(self):
         snap = {"codex": _codex(single=True), "claude": _claude(auth=False),

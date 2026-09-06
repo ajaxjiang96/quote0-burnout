@@ -47,6 +47,7 @@ cp config.example.env .env
 | `CLAUDE_ACCESS_TOKEN` | | 覆盖 Claude token（默认 `~/.claude/.credentials.json` 或 macOS Keychain；缺失时 fallback 到 `claude /usage`） |
 | `DEEPSEEK_API_KEY` | | DeepSeek 余额 + 价目（`DEEPSEEK_MODEL` 选计价模型） |
 | `OPENCODE_GO_API_KEY` | | OpenCode Zen 用量 API |
+| `AGY_API_KEY` | | Google AGY (Antigravity) 配额 API key |
 | `LAYOUT` | | `auto`（默认）/ `stack` / `1+1` / `1+2` / `2+2` |
 | `REFRESH_INTERVAL` | | 自调度循环间隔（如 `60`, `5m`, `1h`；最低 60s） |
 

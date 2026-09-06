@@ -30,7 +30,7 @@ from render import render_image
 
 # Provider implementations live in providers/; display.py stays the shell
 # (CLI, push, cache, orchestration, second-panel resolution).
-from providers import claude, codex, configured_providers, deepseek, opencode
+from providers import agy, claude, codex, configured_providers, deepseek, opencode
 from providers.core import (CURRENCY_SYMBOLS, coerce_percent as _coerce_percent,
                             env as _env, pct_status as _pct_status,
                             time_until as _time_until, window_label as _window_label)
@@ -44,6 +44,7 @@ QUOTE0_DEVICE_ID   = _env("QUOTE0_DEVICE_ID")
 DEEPSEEK_API_KEY   = deepseek.DEEPSEEK_API_KEY
 DEEPSEEK_MODEL     = deepseek.DEEPSEEK_MODEL
 CLAUDE_ACCESS_TOKEN = claude.CLAUDE_ACCESS_TOKEN
+AGY_API_KEY        = agy.AGY_API_KEY
 QUOTE0_REFRESH_NOW = _env("QUOTE0_REFRESH_NOW", "false").lower() == "true"
 
 # Second panel: auto (prefer opencode-go, fall back to deepseek) | deepseek | opencode
@@ -104,15 +105,18 @@ build_codex_snapshot = codex.build_snapshot
 build_claude_snapshot = claude.build_snapshot
 build_deepseek_snapshot = deepseek.build_snapshot
 build_opencode_snapshot = opencode.build_snapshot
+build_agy_snapshot = agy.build_snapshot
 format_codex_text = codex.format_text
 format_claude_text = claude.format_text
 format_deepseek_text = deepseek.format_text
 format_opencode_text = opencode.format_text
+format_agy_text = agy.format_text
 get_codex_usage = codex.get_usage
 get_codex_reset_credits = codex.get_codex_reset_credits
 get_claude_usage = claude.get_usage
 get_deepseek_balance = deepseek.get_balance
 get_opencode_usage = opencode.get_usage
+get_agy_usage = agy.get_usage
 parse_claude_cli_usage = claude.parse_claude_cli_usage
 _extract_claude_access_token = claude._extract_claude_access_token
 DEEPSEEK_PRICING = deepseek.DEEPSEEK_PRICING
@@ -208,10 +212,12 @@ def build_snapshot(layout: str | None = None) -> dict:
     claude = get_claude_usage()
     deepseek = get_deepseek_balance()
     opencode = get_opencode_usage()
+    agy_data = get_agy_usage()
     codex_sn = build_codex_snapshot(codex, reset_credits=codex_resets)
     claude_sn = build_claude_snapshot(claude)
     deepseek_sn = build_deepseek_snapshot(deepseek)
     opencode_sn = build_opencode_snapshot(opencode)
+    agy_sn = build_agy_snapshot(agy_data)
 
     # Previous snapshot (if any) for per-provider change detection — served
     # through the same cache file the fallback path below reads.
@@ -220,7 +226,8 @@ def build_snapshot(layout: str | None = None) -> dict:
     except (OSError, ValueError):
         prev_snap = None
     for name, p_sn in (("codex", codex_sn), ("claude", claude_sn),
-                       ("deepseek", deepseek_sn), ("opencode", opencode_sn)):
+                       ("deepseek", deepseek_sn), ("opencode", opencode_sn),
+                       ("agy", agy_sn)):
         refresh_provider_ts(p_sn, (prev_snap or {}).get(name), now_stamp)
 
     snap = {
@@ -228,6 +235,7 @@ def build_snapshot(layout: str | None = None) -> dict:
         "claude": claude_sn,
         "deepseek": deepseek_sn,
         "opencode": opencode_sn,
+        "agy": agy_sn,
         "second_panel": _resolve_second_panel(deepseek_sn, opencode_sn),
         "layout": layout,
         # reserved for the #15 公版 provider contract — the grid engine
@@ -253,6 +261,7 @@ def build_snapshot(layout: str | None = None) -> dict:
             cached["claude"] = snap["claude"]  # refresh what is fresh
             cached["deepseek"] = snap["deepseek"]
             cached["opencode"] = snap["opencode"]
+            cached["agy"] = snap["agy"]
             cached["second_panel"] = snap["second_panel"]
             # Always refresh layout metadata from the live run: a stale
             # cached copy would otherwise fight an changed --layout/LAYOUT
@@ -400,6 +409,13 @@ def run(preview: bool = False, text_mode: bool = False, layout: str | None = Non
                     print(f"          {cl['long_label']} {cl['long_used_percent']}%")
             else:
                 print(f"Claude:    {cl['raw_status']}")
+            agy = snapshot.get("agy", {})
+            if agy.get("ok"):
+                print(f"Google AGY: {agy['short_label']} {agy['short_used_percent']}% reset {agy['short_reset']} [{agy['status']}]")
+                if agy.get("long_used_percent") is not None:
+                    print(f"          {agy['long_label']} {agy['long_used_percent']}%")
+            elif agy.get("raw_status"):
+                print(f"Google AGY: {agy['raw_status']}")
             second_line = _second_panel_line(snapshot)
             if second_line:
                 print(second_line)
@@ -451,6 +467,7 @@ def check() -> int:
         ("QUOTE0_IMAGE_TASK_KEY", QUOTE0_IMAGE_TASK_KEY, False),
         ("QUOTE0_TEXT_TASK_KEY",  QUOTE0_TEXT_TASK_KEY,  False),
         ("CLAUDE_ACCESS_TOKEN",   CLAUDE_ACCESS_TOKEN,   False),
+        ("AGY_API_KEY",           AGY_API_KEY,           False),
     ]
 
     for name, val, required in env_vars:
@@ -524,6 +541,25 @@ def check() -> int:
         claude_ok = True
     else:
         print(_status("usage", False, sn_claude["raw_status"]))
+
+    print()
+
+    # ── Google AGY ──────────────────────────────────────────────────────────
+    print("Google AGY:")
+    agy_ok = False
+    if AGY_API_KEY:
+        agy = get_agy_usage()
+        sn_agy = build_agy_snapshot(agy)
+        if sn_agy["ok"]:
+            pct = sn_agy["short_used_percent"]
+            pct_str = f"{pct}%" if pct is not None else "?"
+            detail = f"{sn_agy['short_label']} {pct_str} [{sn_agy['status']}]"
+            print(_status("usage", True, detail))
+            agy_ok = True
+        else:
+            print(_status("usage", False, sn_agy["raw_status"]))
+    else:
+        print(_status("usage", True, "optional / not configured"))
 
     print()
 
