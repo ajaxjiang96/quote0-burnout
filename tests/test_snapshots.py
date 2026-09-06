@@ -195,16 +195,41 @@ class AGYSnapshotTests(unittest.TestCase):
         self.assertIsNone(sn["short_used_percent"])
         self.assertIsNone(sn["long_used_percent"])
 
+    def test_parse_cli_raw_quota(self):
+        import providers.agy as agy_mod
+
+        cli_text = (
+            "Gemini Models\tWeekly Limit Remaining\t97%\t2026-09-13T13:23:36Z\n"
+            "Gemini Models\tFive Hour Limit Remaining\t83%\t2026-09-06T18:23:36Z\n"
+            "Claude and GPT models\tWeekly Limit Remaining\t100%\t2026-09-13T13:58:49Z\n"
+            "Claude and GPT models\tFive Hour Limit Remaining\t100%\t2026-09-06T18:58:49Z\n"
+        )
+        parsed = agy_mod.parse_agy_cli_output(cli_text)
+        self.assertIn("gemini", parsed)
+        self.assertIn("claude_gpt", parsed)
+        self.assertEqual(parsed["gemini"]["five_hour"]["remaining"], 83)
+        self.assertEqual(parsed["gemini"]["five_hour"]["used_percent"], 17)
+        self.assertEqual(parsed["gemini"]["weekly"]["remaining"], 97)
+        self.assertEqual(parsed["gemini"]["weekly"]["used_percent"], 3)
+
+        sn_cli = display.build_agy_snapshot({"ok": True, "raw": cli_text})
+        self.assertTrue(sn_cli["ok"])
+        self.assertEqual(sn_cli["short_label"], "5h")
+        self.assertEqual(sn_cli["short_used_percent"], 17)
+        self.assertEqual(sn_cli["long_label"], "Week")
+        self.assertEqual(sn_cli["long_used_percent"], 3)
+        self.assertEqual(sn_cli["status"], "ok")
+
     def test_valid_quota_response(self):
         raw = {
-            "quotas": {
-                "daily": {"used_percent": 35, "resets_at": "2026-09-07T00:00:00Z"},
-                "weekly": {"used_percent": 60, "resets_at": "2026-09-12T00:00:00Z"},
+            "gemini": {
+                "five_hour": {"label": "5h", "remaining": 65, "used_percent": 35, "resets_at": "2026-09-07T00:00:00Z"},
+                "weekly": {"label": "Week", "remaining": 40, "used_percent": 60, "resets_at": "2026-09-12T00:00:00Z"},
             }
         }
         sn = display.build_agy_snapshot({"ok": True, "raw": raw})
         self.assertTrue(sn["ok"])
-        self.assertEqual(sn["short_label"], "Day")
+        self.assertEqual(sn["short_label"], "5h")
         self.assertEqual(sn["short_used_percent"], 35)
         self.assertEqual(sn["long_label"], "Week")
         self.assertEqual(sn["long_used_percent"], 60)
@@ -212,19 +237,29 @@ class AGYSnapshotTests(unittest.TestCase):
 
     def test_status_levels(self):
         # >= 70% warn
-        raw_warn = {"quotas": {"daily": {"used_percent": 75}, "weekly": {"used_percent": 30}}}
+        raw_warn = {
+            "gemini": {
+                "five_hour": {"remaining": 25, "used_percent": 75},
+                "weekly": {"remaining": 70, "used_percent": 30},
+            }
+        }
         sn_warn = display.build_agy_snapshot({"ok": True, "raw": raw_warn})
         self.assertEqual(sn_warn["status"], "warn")
 
         # >= 90% hot
-        raw_hot = {"quotas": {"daily": {"used_percent": 20}, "weekly": {"used_percent": 95}}}
+        raw_hot = {
+            "gemini": {
+                "five_hour": {"remaining": 80, "used_percent": 20},
+                "weekly": {"remaining": 5, "used_percent": 95},
+            }
+        }
         sn_hot = display.build_agy_snapshot({"ok": True, "raw": raw_hot})
         self.assertEqual(sn_hot["status"], "hot")
 
     def test_format_text(self):
         sn = {
             "ok": True,
-            "short_label": "Day",
+            "short_label": "5h",
             "short_used_percent": 35,
             "short_reset": "4h",
             "long_label": "Week",
@@ -232,7 +267,7 @@ class AGYSnapshotTests(unittest.TestCase):
             "long_reset": "3d",
         }
         text = display.format_agy_text(sn)
-        self.assertIn("Day 35%", text)
+        self.assertIn("5h 35%", text)
         self.assertIn("Week 60%", text)
 
 
@@ -315,11 +350,13 @@ class ProviderConfiguredTests(unittest.TestCase):
         with patch("providers.opencode.OPENCODE_GO_API_KEY", "oc-1"):
             self.assertTrue(oc.is_configured())
         with patch("providers.agy.AGY_AUTH_PATH", _P("/nonexistent/xyz")), \
-             patch("providers.agy.AGY_API_KEY", ""):
+             patch("providers.agy.AGY_API_KEY", ""), \
+             patch("providers.agy._find_agy_cli", return_value=None):
             with patch.dict(os.environ, {}, clear=False):
                 self._no_env("AGY_API_KEY", "GOOGLE_AGY_API_KEY")
                 self.assertFalse(agy.is_configured())
         with patch("providers.agy.AGY_AUTH_PATH", _P("/nonexistent/xyz")), \
+             patch("providers.agy._find_agy_cli", return_value=None), \
              patch.dict(os.environ, {"AGY_API_KEY": "agy-1"}):
             self.assertTrue(agy.is_configured())
 
