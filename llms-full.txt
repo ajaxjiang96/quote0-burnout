@@ -38,7 +38,7 @@
 
 ### Google AGY (Antigravity)
 - **Authentication**: Local token file (`~/.gemini/antigravity-cli/antigravity-oauth-token`), `AGY_API_KEY`, or `agy` CLI binary.
-- **Data Source**: Fetched via `agy --print /quota`. Outputs tab-separated records for Gemini Models and Claude/GPT models.
+- **Data Source**: Fetched via `agy --print /quota` (with `stdin=subprocess.DEVNULL`). Outputs tab-separated records for Gemini Models and Claude/GPT models.
 - **Normalization**: Translates remaining percentage to utilization: `used_percent = 100 - remaining_percent`.
 
 ### DeepSeek
@@ -92,3 +92,26 @@
 - `python display.py --check`: Diagnostic self-check verifying auth, APIs, rendering, and device endpoints.
 - `python display.py --debug-json`: Dump normalized snapshot JSON to standard output.
 - `python display.py --text`: Push textual summary instead of monochrome image.
+
+---
+
+## 6. Bundled Agent Skills (Vercel Skills Standard)
+
+The repository provides two specialized, path-sanitized agent skills:
+- **`skills/quote0-burnout-develop/SKILL.md`**: Development guidelines, 4-method provider contract (`is_configured`, `get_usage`, `build_snapshot`, `format_text`), typography rules, layout engine seams, and test verification procedures.
+- **`skills/quote0-burnout-deploy/SKILL.md`**: Isolated deployment procedure, launchd lifecycle management, environment variables symlinking, and hardware push confirmation.
+- **References**:
+  - `skills/quote0-burnout-develop/references/eink-design.md`: Detailed pixel design constraints and e-ink rasterization standards.
+  - `skills/quote0-burnout-develop/references/quote0-api.md`: Open platform API specification.
+
+---
+
+## 7. Deployment Isolation Architecture
+
+- **Dedicated Deploy Worktree**: The live device is updated exclusively from a detached Git worktree (`$DEPLOY_DIR`, e.g. `~/Projects/quote0-burnout-deploy`), keeping unfinished development work off the screen.
+- **Symlinked Environment**: `$DEPLOY_DIR/.env` and `$DEPLOY_DIR/.venv` are symlinked to share credentials and virtual environments without duplicated storage.
+- **macOS launchd Daemon**: Scheduled via `scripts/com.example.quote0-burnout.plist.example` (copy to `~/Library/LaunchAgents/` with machine-local paths) running every 5 minutes.
+- **Release Procedure**:
+  1. `git -C "$DEPLOY_DIR" fetch origin main && git -C "$DEPLOY_DIR" checkout --detach origin/main`
+  2. `launchctl kickstart gui/$(id -u)/"$LABEL"`
+  3. Verify log output confirms `"设备 <id> 图片 API 内容已切换。"`.
