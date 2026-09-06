@@ -76,9 +76,9 @@ python display.py --list-tasks # list task slots
 ## Scheduling (macOS launchd, every 5 min)
 
 ```bash
-cp com.ajax.quote0-burnout.plist.example ~/Library/LaunchAgents/
-# edit the Program path, then:
-launchctl load ~/Library/LaunchAgents/com.ajax.quote0-burnout.plist
+cp scripts/com.example.quote0-burnout.plist.example ~/Library/LaunchAgents/
+# Edit the Label / Program / log paths in the plist, then:
+launchctl load ~/Library/LaunchAgents/com.example.quote0-burnout.plist
 ```
 
 ## Frequently Asked Questions (FAQ)
@@ -106,7 +106,7 @@ The system employs **failure isolation and silent omission**: unconfigured or fa
 
 - **Codex / Claude "no auth"** — run `codex` / `claude` to re-authenticate
 - **Push 404** — delete and re-add the IMAGE_API card in Dot. App Content Studio
-- **Schedule not updating** — `launchctl kickstart gui/$(id -u)/com.ajax.quote0-burnout`
+- **Schedule not updating** — `launchctl kickstart gui/$(id -u)/com.example.quote0-burnout`
 
 ## Development & Contributing
 
@@ -114,5 +114,17 @@ The system employs **failure isolation and silent omission**: unconfigured or fa
 - `providers/`: provider implementations (fetch → snapshot → text)
 - `render.py`: layout engine + rendering; `scripts/render_layout_gallery.py` regenerates preview images
 - Testing: `python3 -m pytest`
-- Pixel-level design spec: [skill/references/eink-design.md](skill/references/eink-design.md)
-- This repo ships [skill/SKILL.md](skill/SKILL.md) (Vercel Skills standard) — drop it into Hermes Agent for AI-assisted development
+- Pixel-level design spec: [skills/quote0-burnout-develop/references/eink-design.md](skills/quote0-burnout-develop/references/eink-design.md)
+
+### Bundled Agent Skills
+
+This repo ships two Hermes-compatible skills for an agent (e.g. Hermes Agent) to load in the matching scenario:
+
+- [skills/quote0-burnout-develop/SKILL.md](skills/quote0-burnout-develop/SKILL.md) — **development**: architecture, provider contract (incl. AGY `--print /quota`), layout/rendering, pitfalls, verification. Load when changing code.
+- [skills/quote0-burnout-deploy/SKILL.md](skills/quote0-burnout-deploy/SKILL.md) — **deployment**: deploy worktree, launchd kickstart, verifying the device. Load when publishing a release.
+
+### Deploy via Agent
+
+The device is driven by a launchd job that fetches and pushes periodically from a **dedicated deploy worktree** (separate from the dev checkout). To push latest `main`, have the agent load [skills/quote0-burnout-deploy/SKILL.md](skills/quote0-burnout-deploy/SKILL.md) and follow its "Release procedure": point the deploy worktree at latest `origin/main`, fire one `launchctl kickstart`, then confirm the device reports "内容已切换".
+
+Worktree paths, launchd label, etc. are per-machine (the skill uses placeholders). This repo carries no server paths or personal device identifiers.

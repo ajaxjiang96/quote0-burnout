@@ -76,9 +76,9 @@ python display.py --list-tasks # 列出任务槽位
 ## 定时任务（macOS launchd，每 5 分钟）
 
 ```bash
-cp com.ajax.quote0-burnout.plist.example ~/Library/LaunchAgents/
-# 编辑 plist 里的路径，然后：
-launchctl load ~/Library/LaunchAgents/com.ajax.quote0-burnout.plist
+cp scripts/com.example.quote0-burnout.plist.example ~/Library/LaunchAgents/
+# 编辑 plist 里的 Label / Program / 日志路径，然后：
+launchctl load ~/Library/LaunchAgents/com.example.quote0-burnout.plist
 ```
 
 ## 常见问题（FAQ）
@@ -106,7 +106,7 @@ MindReset Quote/0 采用 296×152 分辨率黑白电子纸屏。灰阶抖动（D
 
 - **Codex / Claude 显示 "no auth"** —— 运行 `codex` / `claude` 重新认证
 - **推送 404** —— Dot. App 里删掉 IMAGE_API 卡片重新添加
-- **定时不更新** —— `launchctl kickstart gui/$(id -u)/com.ajax.quote0-burnout`
+- **定时不更新** —— `launchctl kickstart gui/$(id -u)/com.example.quote0-burnout`
 
 ## 开发与贡献
 
@@ -114,6 +114,18 @@ MindReset Quote/0 采用 296×152 分辨率黑白电子纸屏。灰阶抖动（D
 - `providers/`：provider 实现（fetch → snapshot → text）
 - `render.py`：布局引擎 + 渲染；`scripts/render_layout_gallery.py` 可重新生成上面的效果图
 - 测试：`python3 -m pytest`
-- 像素级设计规格：[skill/references/eink-design.md](skill/references/eink-design.md)
-- 本仓库附带 [skill/SKILL.md](skill/SKILL.md)（Vercel Skills 标准），可直接导入 Hermes Agent 使用
+- 像素级设计规格：[skills/quote0-burnout-develop/references/eink-design.md](skills/quote0-burnout-develop/references/eink-design.md)
+
+### 仓库自带 Agent 技能
+
+本仓库随附两个 Hermes 兼容的技能，供 agent（如 Hermes Agent）在对应场景下加载：
+
+- [skills/quote0-burnout-develop/SKILL.md](skills/quote0-burnout-develop/SKILL.md) —— **开发**：架构、provider 契约（含 AGY `--print /quota` 取数）、布局/渲染、陷阱与验证清单。改代码时加载。
+- [skills/quote0-burnout-deploy/SKILL.md](skills/quote0-burnout-deploy/SKILL.md) —— **部署**：deploy worktree、launchd kickstart、验证上屏。发布版本时加载。
+
+### 通过 Agent 部署（Deploy via Agent）
+
+设备由 launchd 守护进程定时从**独立的部署 worktree**（脱离开发目录）拉取并推送。要让设备跑最新 `main`，让 agent 加载 [skills/quote0-burnout-deploy/SKILL.md](skills/quote0-burnout-deploy/SKILL.md) 并按其中的「发布流程」执行：把部署 worktree 切到最新 `origin/main`，触发一次 `launchctl kickstart`，再确认设备返回「内容已切换」。
+
+worktree 路径、launchd label 等按各自机器配置（skill 里已用占位变量），本仓库不携带具体服务器路径或个人设备标识。
 

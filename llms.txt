@@ -58,6 +58,7 @@ Every provider module under `providers/<name>.py` implements 4 required function
 
 - [Layout Specification](docs/layouts.md): Coordinate grids, cell contracts, seam rules, and typography.
 - [Contributing Guide](CONTRIBUTING.md): Provider implementation contracts, layout tier constraints, and testing guidelines.
-- [Pixel Design Specs](skill/references/eink-design.md): E-ink rendering constraints and font rasterization rules.
-- [Skill Definition](skill/SKILL.md): Vercel Skills standard definition for AI agent pair programming.
+- [Pixel Design Specs](skills/quote0-burnout-develop/references/eink-design.md): E-ink rendering constraints and font rasterization rules.
+- [Development Skill](skills/quote0-burnout-develop/SKILL.md): Build/maintain the dashboard — architecture, providers (incl. AGY), layout, pitfalls.
+- [Deployment Skill](skills/quote0-burnout-deploy/SKILL.md): Release main to the device — deploy worktree, launchd kickstart, verification.
 - [Full LLM Context](llms-full.txt): Aggregated complete documentation and specifications in a single file.
