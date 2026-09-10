@@ -15,17 +15,19 @@ const OPENCODE_KEY = "";  // OpenCode Go 用量 API key（第二面板，优先�
 // 高峰时段为工作日 UTC 01:00–04:00、06:00–10:00（周一至周五；北京时间 9:00–12:00、14:00–18:00）；
 // 周末与其余时段一律谷时 ×0.5
 const DS_PRICES = {
-  "deepseek-v4-flash": {
-    USD: { in: { peak: 0.44, off: 0.22 },  out: { peak: 1.32, off: 0.66 } },
-    CNY: { in: { peak: 3.0,  off: 1.5 },   out: { peak: 9.0,  off: 4.5 } }
+  "deepseek-flash": {
+    USD: { in: { peak: 0.3, off: 0.15 },  out: { peak: 1.2, off: 0.6 } },
+    CNY: { in: { peak: 2.0, off: 1.0 },   out: { peak: 8.0, off: 4.0 } }
   },
   "deepseek-v4-pro": {
     USD: { in: { peak: 1.32, off: 0.66 },  out: { peak: 3.96, off: 1.98 } },
     CNY: { in: { peak: 9.0,  off: 4.5 },   out: { peak: 27.0, off: 13.5 } }
   }
 };
-// 多模态模型（2026-08-21 上线）：与 v4-flash 同价（图片转 token，≤384 tokens/张）
-DS_PRICES["deepseek-v4-flash-vision-exp"] = DS_PRICES["deepseek-v4-flash"];
+// 标准名 `deepseek-flash`（V4.1 Flash，2026-09-10 12:00 北京时间生效）；
+// 旧 id deepseek-v4-flash / deepseek-v4-flash-vision-exp 仍被接受且同价
+DS_PRICES["deepseek-v4-flash"] = DS_PRICES["deepseek-flash"];
+DS_PRICES["deepseek-v4-flash-vision-exp"] = DS_PRICES["deepseek-flash"];
 
 function dsWindow(currency) {
   const now = new Date();

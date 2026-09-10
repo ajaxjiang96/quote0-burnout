@@ -10,25 +10,28 @@ from .core import CURRENCY_SYMBOLS, env as _env
 
 # DeepSeek billing window (peak / off-peak)
 # Official pricing: https://api-docs.deepseek.com/quick_start/pricing
-# (fetched 2026-09-10, en). Peak hours are WEEKDAYS ONLY: 01:00–04:00 and
-# 06:00–10:00 UTC, Monday–Friday (= 北京 9:00–12:00, 14:00–18:00 工作日);
-# weekends and all other hours are off-peak at 50%.
+# (fetched 2026-09-10, en + 官方公号). Peak hours are WEEKDAYS ONLY:
+# 01:00–04:00 and 06:00–10:00 UTC, Monday–Friday (= 北京 9:00–12:00,
+# 14:00–18:00 工作日); weekends and all other hours are off-peak at 50%.
+# Flash rates below are the V4.1 Flash card effective 2026-09-10 12:00 北京.
 DEEPSEEK_API_KEY = _env("DEEPSEEK_API_KEY")
 DEEPSEEK_MODEL   = _env("DEEPSEEK_MODEL", "deepseek-v4-flash")
 DEEPSEEK_PRICING = {
-    "deepseek-v4-flash": {
-        "label": "DeepSeek-V4-Flash",
+    "deepseek-flash": {
+        "label": "DeepSeek V4.1 Flash",
         # USD per 1M tokens (cache-miss input / output)
         "USD": {
-            "in":  {"peak": 0.44, "off": 0.22},
-            "out": {"peak": 1.32, "off": 0.66},
+            "in":  {"peak": 0.3, "off": 0.15},
+            "out": {"peak": 1.2, "off": 0.6},
         },
         # CNY per 1M tokens (cache-miss input / output)
         "CNY": {
-            "in":  {"peak": 3.0, "off": 1.5},
-            "out": {"peak": 9.0, "off": 4.5},
+            "in":  {"peak": 2.0, "off": 1.0},
+            "out": {"peak": 8.0, "off": 4.0},
         },
     },
+    # Still listed at its own rates; from 2026-09-14 12:00 北京 the API routes
+    # deepseek-v4-pro to V4.1 Flash and bills the Flash price.
     "deepseek-v4-pro": {
         "label": "DeepSeek-V4-Pro",
         "USD": {
@@ -41,10 +44,11 @@ DEEPSEEK_PRICING = {
         },
     },
 }
-# deepseek-v4-flash-vision-exp (launched 2026-08-21): multimodal model billed
-# at the same token prices as deepseek-v4-flash — images convert to tokens
-# (≤384 tokens/image, resized to ~800×800), billed together with text tokens.
-DEEPSEEK_PRICING["deepseek-v4-flash-vision-exp"] = DEEPSEEK_PRICING["deepseek-v4-flash"]
+# The flash model is now `deepseek-flash` (DeepSeek-V4.1-Flash). The legacy ids
+# `deepseek-v4-flash` and `deepseek-v4-flash-vision-exp` are still accepted by
+# the API and billed at the same Flash price, so they resolve to these rates.
+DEEPSEEK_PRICING["deepseek-v4-flash"] = DEEPSEEK_PRICING["deepseek-flash"]
+DEEPSEEK_PRICING["deepseek-v4-flash-vision-exp"] = DEEPSEEK_PRICING["deepseek-flash"]
 
 
 def deepseek_window(now_utc: datetime | None = None, currency: str = "USD") -> dict:
