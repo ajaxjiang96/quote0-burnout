@@ -10,11 +10,11 @@ from .core import CURRENCY_SYMBOLS, env as _env
 
 # DeepSeek billing window (peak / off-peak)
 # Official pricing: https://api-docs.deepseek.com/quick_start/pricing
-# (fetched 2026-08-21, en + zh-cn). Peak hours: 01:00–04:00 and 06:00–10:00
-# UTC (= 北京 9:00–12:00, 14:00–18:00); ALL other hours are off-peak at 50%.
+# (fetched 2026-09-10, en). Peak hours are WEEKDAYS ONLY: 01:00–04:00 and
+# 06:00–10:00 UTC, Monday–Friday (= 北京 9:00–12:00, 14:00–18:00 工作日);
+# weekends and all other hours are off-peak at 50%.
 DEEPSEEK_API_KEY = _env("DEEPSEEK_API_KEY")
 DEEPSEEK_MODEL   = _env("DEEPSEEK_MODEL", "deepseek-v4-flash")
-# UTC (= 北京 9:00–12:00, 14:00–18:00); ALL other hours are off-peak at 50%.
 DEEPSEEK_PRICING = {
     "deepseek-v4-flash": {
         "label": "DeepSeek-V4-Flash",
@@ -56,27 +56,37 @@ def deepseek_window(now_utc: datetime | None = None, currency: str = "USD") -> d
     current window lasts (`ends_in` seconds, `countdown` human string) and
     which window comes next (`next_window`).
 
-    Peak windows: [01:00,04:00) and [06:00,10:00) UTC → next transition at
-    04:00 / 10:00. Off-peak: [00:00,01:00) → 01:00; [04:00,06:00) → 06:00;
-    [10:00,24:00) → 01:00 next day.
+    Peak applies on WEEKDAYS only — [01:00,04:00) and [06:00,10:00) UTC,
+    Monday–Friday. Weekends are off-peak the whole time, so on a Saturday or
+    Sunday the next switch is Monday 01:00 UTC; Friday ≥ 10:00 UTC is also
+    off-peak straight through to that same Monday 01:00.
     """
     if now_utc is None:
         now_utc = datetime.now(timezone.utc)
+    wd = now_utc.weekday()  # 0 = Monday … 6 = Sunday
     h = now_utc.hour
-    peak = (1 <= h < 4) or (6 <= h < 10)
+    weekend = wd >= 5
+    peak = (not weekend) and ((1 <= h < 4) or (6 <= h < 10))
 
-    if 1 <= h < 4:
-        end_h, end_d, next_win = 4, 0, "OFF"
+    def _at(days: int, hour: int) -> datetime:
+        return (now_utc + timedelta(days=days)).replace(
+            hour=hour, minute=0, second=0, microsecond=0)
+
+    if weekend:
+        # Off-peak until Monday 01:00 UTC — the week's first peak window.
+        ends, next_win = _at(7 - wd, 1), "PEAK"
+    elif 1 <= h < 4:
+        ends, next_win = _at(0, 4), "OFF"
     elif 4 <= h < 6:
-        end_h, end_d, next_win = 6, 0, "PEAK"
+        ends, next_win = _at(0, 6), "PEAK"
     elif 6 <= h < 10:
-        end_h, end_d, next_win = 10, 0, "OFF"
-    elif 10 <= h < 24:
-        end_h, end_d, next_win = 1, 1, "PEAK"
+        ends, next_win = _at(0, 10), "OFF"
+    elif h >= 10:
+        # Friday afternoon rolls over the weekend → peak resumes Monday, not Saturday.
+        ends, next_win = _at(3 if wd == 4 else 1, 1), "PEAK"
     else:  # 00:00 ≤ h < 01:00
-        end_h, end_d, next_win = 1, 0, "PEAK"
+        ends, next_win = _at(0, 1), "PEAK"
 
-    ends = now_utc.replace(hour=end_h, minute=0, second=0, microsecond=0) + timedelta(days=end_d)
     ends_in = max(0, int((ends - now_utc).total_seconds()))
 
     factor = 1.0 if peak else 0.5
