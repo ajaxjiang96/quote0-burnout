@@ -17,7 +17,7 @@
 - **OpenAI Codex**: 5h and weekly quota usage via direct OAuth token; displays remaining %, reset countdown, and available reset credits with expiry.
 - **Claude Code (Anthropic)**: 5h and 7-day usage windows via OAuth credentials or `claude /usage` CLI fallback.
 - **Google AGY (Antigravity)**: 5h and weekly quota tracking via `agy --print /quota` CLI or API override; calculates `used% = 100 - remaining%`.
-- **DeepSeek**: Real-time account balance with peak/off-peak billing status (PEAK / OFF, 50% discount during off-peak) and switch countdown.
+- **DeepSeek**: Real-time account balance with peak/off-peak billing status (PEAK / OFF, 50% discount during off-peak — weekends are off-peak all day; peak is weekdays 01:00–04:00 & 06:00–10:00 UTC) and switch countdown.
 - **OpenCode**: Zen "Go" subscription windows (5h / Week / Month).
 
 ## Quick CLI Reference

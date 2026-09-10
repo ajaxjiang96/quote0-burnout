@@ -90,8 +90,10 @@ class CodexSnapshotTests(unittest.TestCase):
 
 
 class DeepSeekWindowTests(unittest.TestCase):
-    def _window(self, hour, minute=0, currency="USD"):
-        now = datetime(2026, 8, 21, hour, minute, tzinfo=timezone.utc)
+    def _window(self, hour, minute=0, currency="USD", day=20):
+        # 2026-08-20 is a Thursday → the weekday peak windows apply. day=21 is
+        # Friday, 22 Saturday, 23 Sunday (weekend = off-peak all day).
+        now = datetime(2026, 8, day, hour, minute, tzinfo=timezone.utc)
         return display.deepseek_window(now_utc=now, currency=currency)
 
     def test_peak_01_to_04(self):
@@ -123,6 +125,32 @@ class DeepSeekWindowTests(unittest.TestCase):
         self.assertEqual(self._window(0)["window"], "OFF")
         self.assertEqual(self._window(1)["window"], "PEAK")
         self.assertEqual(self._window(10)["window"], "OFF")
+
+    def test_weekend_is_offpeak_all_day(self):
+        # Sat 2026-08-22 / Sun 2026-08-23: the peak windows do not apply at all.
+        for day in (22, 23):
+            for hour in (0, 2, 5, 8, 10, 13, 23):
+                w = self._window(hour, day=day)
+                self.assertEqual(w["window"], "OFF", f"day={day} hour={hour}")
+                self.assertEqual(w["factor"], 0.5)
+                self.assertEqual(w["next_window"], "PEAK")
+
+    def test_weekend_countdown_points_at_monday_0100(self):
+        self.assertEqual(self._window(2, day=22)["countdown"], "1d23h")   # Sat 02:00 → Mon 01:00 (47h)
+        self.assertEqual(self._window(12, day=23)["countdown"], "13h")    # Sun 12:00 → Mon 01:00
+
+    def test_friday_evening_skips_the_weekend(self):
+        # Friday ≥ 10:00 UTC is off-peak straight through to Monday 01:00 —
+        # NOT to Saturday 01:00 (which is off-peak anyway).
+        w = self._window(13, day=21)
+        self.assertEqual(w["window"], "OFF")
+        self.assertEqual(w["next_window"], "PEAK")
+        self.assertEqual(w["countdown"], "2d12h")  # Fri 13:00 → Mon 01:00 (60h)
+
+    def test_friday_morning_still_peaks(self):
+        # Weekday gating only removes PEAK on Sat/Sun, not on Friday itself.
+        self.assertEqual(self._window(2, day=21)["window"], "PEAK")
+        self.assertEqual(self._window(8, day=21)["window"], "PEAK")
 
     def test_cny_prices(self):
         w = self._window(3, currency="CNY")

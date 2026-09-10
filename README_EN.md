@@ -27,7 +27,7 @@ AI usage & rate-limit dashboard for MindReset Quote/0 e-ink display — OpenAI C
 
 - **Google AGY (Antigravity)**: 5h and weekly quota usage fetched via `agy --print /quota`, automatic remaining% conversion, reset countdowns, and official 16×16 bitmap arch logo
 - **OpenAI Codex / Claude Code**: matched dual-row panels (5h / Week) with dot-grid bars, remaining% + reset countdown, plus Codex manual reset credits & expiry
-- **DeepSeek**: hero balance (VCR 21px) + peak/off-peak billing tier (PEAK/OFF, official rate card 2026-08; off-peak = 50% discount) + countdown to the next tier switch
+- **DeepSeek**: hero balance (VCR 21px) + peak/off-peak billing tier (PEAK/OFF, official rate card 2026-09; off-peak = 50% discount, **weekends off-peak all day**) + countdown to the next tier switch
 - **OpenCode Go**: Zen "Go" subscription usage (5h / Wk / Mo)
 - **Dynamic Auto-Layout**: automatically selects `stack`, `1+1`, `1+2`, or `2+2` based on the count of active live providers
 - **Recency-Based Ordering**: the provider whose data changed most recently gets the most prominent slot; unauthenticated or dead providers are silently hidden

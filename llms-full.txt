@@ -43,7 +43,7 @@
 
 ### DeepSeek
 - **Authentication**: `DEEPSEEK_API_KEY`.
-- **Metrics**: Real-time account balance with hero 21px VCR font, dynamic billing tier (PEAK vs OFF-PEAK, 50% discount), and countdown until the next rate switch.
+- **Metrics**: Real-time account balance with hero 21px VCR font, dynamic billing tier (PEAK vs OFF-PEAK, 50% discount — weekends are off-peak all day), and countdown until the next rate switch.
 
 ### OpenCode Go
 - **Authentication**: `OPENCODE_GO_API_KEY`.

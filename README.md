@@ -27,7 +27,7 @@ MindReset Quote/0 墨水屏 AI 用量与配额仪表盘 —— 实时聚合 Open
 
 - **Google AGY (Antigravity)**：通过 `agy --print /quota` 获取 5 小时与每周配额，自动折算使用百分比与重置倒计时，搭配官方 16×16 反重力拱门点阵 Logo
 - **OpenAI Codex / Claude Code**：同尺寸双行面板（5h / Week），点阵进度条 + 余量 % + 重置倒计时，Codex 支持手动重置额度与到期提示
-- **DeepSeek**：余额大字（VCR 21px）+ 峰谷计费档（PEAK/OFF，官方价目 2026-08，谷段 = 峰段 ×0.5）+ 档位切换倒计时
+- **DeepSeek**：余额大字（VCR 21px）+ 峰谷计费档（PEAK/OFF，官方价目 2026-09，谷段 = 峰段 ×0.5，**周末全时谷价**）+ 档位切换倒计时
 - **OpenCode Go**：Zen "Go" 订阅用量三行视图（5h / Wk / Mo）
 - **动态自适应布局**：自动依据当前可用的 Provider 数量匹配 `stack` / `1+1` / `1+2` / `2+2`，无缝填满屏幕
 - **热度优先排序**：数据最近发生变化的 provider 自动排到最显眼位置；鉴权失败或超时的 provider 自动隐藏

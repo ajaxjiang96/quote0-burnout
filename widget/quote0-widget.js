@@ -11,8 +11,9 @@ const DS_MODEL = "deepseek-v4-flash";  // 计价模型：deepseek-v4-flash / dee
 const OPENCODE_KEY = "";  // OpenCode Go 用量 API key（第二面板，优先于 DeepSeek）
 // ══════════════════════════════════════════════════════
 
-// DeepSeek 官方价目（百万 tokens，缓存未命中输入 / 输出；来源 api-docs.deepseek.com，2026-08 抓取）
-// 高峰时段 UTC 01:00–04:00、06:00–10:00（北京时间 9:00–12:00、14:00–18:00），其余为谷时 ×0.5
+// DeepSeek 官方价目（百万 tokens，缓存未命中输入 / 输出；来源 api-docs.deepseek.com，2026-09-10 抓取）
+// 高峰时段为工作日 UTC 01:00–04:00、06:00–10:00（周一至周五；北京时间 9:00–12:00、14:00–18:00）；
+// 周末与其余时段一律谷时 ×0.5
 const DS_PRICES = {
   "deepseek-v4-flash": {
     USD: { in: { peak: 0.44, off: 0.22 },  out: { peak: 1.32, off: 0.66 } },
@@ -29,19 +30,30 @@ DS_PRICES["deepseek-v4-flash-vision-exp"] = DS_PRICES["deepseek-v4-flash"];
 function dsWindow(currency) {
   const now = new Date();
   const h = now.getUTCHours();
-  const peak = (h >= 1 && h < 4) || (h >= 6 && h < 10);
-  // 下次切换时间（UTC）：峰段 1-4→04:00、6-10→10:00；谷段 0-1→01:00、4-6→06:00、10-24→次日01:00
-  let endH, endD, next;
-  if (h >= 1 && h < 4)      { endH = 4;  endD = 0; next = "OFF"; }
-  else if (h >= 4 && h < 6) { endH = 6;  endD = 0; next = "PEAK"; }
-  else if (h >= 6 && h < 10){ endH = 10; endD = 0; next = "OFF"; }
-  else if (h >= 10)         { endH = 1;  endD = 1; next = "PEAK"; }
-  else                      { endH = 1;  endD = 0; next = "PEAK"; }
-  const ends = new Date(now);
-  ends.setUTCHours(endH, 0, 0, 0);
-  if (endD) ends.setUTCDate(ends.getUTCDate() + 1);
-  const mins = Math.max(0, Math.round((ends - now) / 60000));
-  const cd = mins >= 60 ? Math.floor(mins / 60) + "h" + pad(mins % 60) + "m" : mins + "m";
+  const wd = now.getUTCDay();            // 0=周日 … 6=周六
+  const weekend = wd === 0 || wd === 6;  // 周末全时谷价
+  const peak = !weekend && ((h >= 1 && h < 4) || (h >= 6 && h < 10));
+  // 下次切换（UTC）：周末→下周一 01:00；峰段 1-4→04:00、6-10→10:00；
+  // 谷段 0-1→01:00、4-6→06:00、10-24→次日 01:00（周五→下周一 01:00）
+  const at = (d, hh) => {
+    const x = new Date(now);
+    x.setUTCDate(x.getUTCDate() + d);
+    x.setUTCHours(hh, 0, 0, 0);
+    return x;
+  };
+  let end, next;
+  if (weekend)              { end = at(wd === 6 ? 2 : 1, 1); next = "PEAK"; }
+  else if (h >= 1 && h < 4) { end = at(0, 4);  next = "OFF"; }
+  else if (h >= 4 && h < 6) { end = at(0, 6);  next = "PEAK"; }
+  else if (h >= 6 && h < 10){ end = at(0, 10); next = "OFF"; }
+  else if (h >= 10)         { end = at(wd === 5 ? 3 : 1, 1); next = "PEAK"; }
+  else                      { end = at(0, 1);  next = "PEAK"; }
+  const mins = Math.max(0, Math.round((end - now) / 60000));
+  const days = Math.floor(mins / 1440);
+  const hrs = Math.floor((mins % 1440) / 60);
+  const cd = days > 0
+    ? days + "d" + (hrs ? hrs + "h" : "")
+    : (mins >= 60 ? hrs + "h" + pad(mins % 60) + "m" : mins + "m");
 
   const p = DS_PRICES[DS_MODEL] || DS_PRICES["deepseek-v4-flash"];
   const cur = p[currency] || p.USD;
