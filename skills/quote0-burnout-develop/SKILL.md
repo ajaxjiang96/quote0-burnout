@@ -72,7 +72,8 @@ Falls back to `claude /usage` CLI. `five_hour` → "5h", `seven_day` → "Week"
 
 ### DeepSeek (balance + billing window)
 `DEEPSEEK_API_KEY` (balance) + `DEEPSEEK_MODEL` for the pricing window
-(`deepseek-v4-flash` / `-pro` / `-flash-vision-exp`). Renders balance as a hero
+(`deepseek-flash`; the legacy ids `deepseek-v4-flash` / `-flash-vision-exp` bill
+the same). Renders balance as a hero
 value with an in/out price badge and a peak/off countdown. Never hardcode the
 currency symbol — read `currency` (CNY/USD/EUR).
 

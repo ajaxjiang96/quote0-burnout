@@ -153,9 +153,22 @@ class DeepSeekWindowTests(unittest.TestCase):
         self.assertEqual(self._window(8, day=21)["window"], "PEAK")
 
     def test_cny_prices(self):
+        # V4.1 Flash rate card (eff. 2026-09-10 12:00 北京): cache-miss in ¥2 / out ¥8 at peak.
         w = self._window(3, currency="CNY")
-        self.assertEqual(w["price_in"], 3.0)
-        self.assertEqual(w["price_out"], 9.0)
+        self.assertEqual(w["price_in"], 2.0)
+        self.assertEqual(w["price_out"], 8.0)
+
+    def test_usd_prices(self):
+        w = self._window(3)  # peak, USD
+        self.assertEqual(w["price_in"], 0.3)
+        self.assertEqual(w["price_out"], 1.2)
+
+    def test_offpeak_is_half_the_peak_rate(self):
+        peak = self._window(3, currency="CNY")
+        off = self._window(13, currency="CNY")
+        self.assertEqual(peak["factor"], 1.0)
+        self.assertEqual(off["factor"], 0.5)
+        self.assertEqual((off["price_in"], off["price_out"]), (1.0, 4.0))
 
     def test_vision_exp_aliases_flash(self):
         w = self._window(3)
@@ -164,6 +177,11 @@ class DeepSeekWindowTests(unittest.TestCase):
             display.DEEPSEEK_PRICING["deepseek-v4-flash-vision-exp"],
             display.DEEPSEEK_PRICING["deepseek-v4-flash"],
         )
+
+    def test_legacy_flash_ids_resolve_to_the_canonical_name(self):
+        canon = display.DEEPSEEK_PRICING["deepseek-flash"]
+        self.assertIs(display.DEEPSEEK_PRICING["deepseek-v4-flash"], canon)
+        self.assertIs(display.DEEPSEEK_PRICING["deepseek-v4-flash-vision-exp"], canon)
 
     def test_countdown_format(self):
         self.assertEqual(display._countdown(8520), "2h22m")
@@ -183,7 +201,7 @@ class DeepSeekWindowTests(unittest.TestCase):
         self.assertEqual(sn["balance"], 18.42)
         self.assertEqual(sn["symbol"], "¥")
         self.assertIn(sn["window"], ("PEAK", "OFF"))
-        self.assertEqual(sn["price_out"], 9.0 if sn["window"] == "PEAK" else 4.5)
+        self.assertEqual(sn["price_out"], 8.0 if sn["window"] == "PEAK" else 4.0)
         self.assertIsNotNone(sn["countdown"])
 
 
