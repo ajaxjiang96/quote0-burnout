@@ -30,19 +30,9 @@ DEEPSEEK_PRICING = {
             "out": {"peak": 8.0, "off": 4.0},
         },
     },
-    # Still listed at its own rates; from 2026-09-14 12:00 北京 the API routes
-    # deepseek-v4-pro to V4.1 Flash and bills the Flash price.
-    "deepseek-v4-pro": {
-        "label": "DeepSeek-V4-Pro",
-        "USD": {
-            "in":  {"peak": 1.32, "off": 0.66},
-            "out": {"peak": 3.96, "off": 1.98},
-        },
-        "CNY": {
-            "in":  {"peak": 9.0, "off": 4.5},
-            "out": {"peak": 27.0, "off": 13.5},
-        },
-    },
+    # deepseek-v4-pro is retired — the API routes it to V4.1 Flash and bills the
+    # Flash price — so only the flash family is priced here. Any other model id
+    # falls back to the flash rates.
 }
 # The flash model is now `deepseek-flash` (DeepSeek-V4.1-Flash). The legacy ids
 # `deepseek-v4-flash` and `deepseek-v4-flash-vision-exp` are still accepted by
