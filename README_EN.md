@@ -73,7 +73,22 @@ python display.py --check      # self-check
 python display.py --list-tasks # list task slots
 ```
 
-## Scheduling (macOS launchd, every 5 min)
+## Scheduling & Deployment
+
+### Docker Deployment (Recommended)
+
+```bash
+cp config.example.env .env
+# Edit .env with your device ID and tokens
+
+# Start container (runs self-scheduling loop with --interval 5m)
+docker compose up -d
+
+# View live logs
+docker compose logs -f
+```
+
+### macOS launchd (every 5 min)
 
 ```bash
 cp scripts/com.example.quote0-burnout.plist.example ~/Library/LaunchAgents/

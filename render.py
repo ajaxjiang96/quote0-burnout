@@ -35,7 +35,13 @@ WHITE = 255
 # ── Font ─────────────────────────────────────────────────────────────────
 
 def _font(size: int) -> ImageFont.FreeTypeFont:
-    return ImageFont.truetype(FONT_PATH, size)
+    try:
+        return ImageFont.truetype(FONT_PATH, size)
+    except OSError:
+        try:
+            return ImageFont.truetype(str(OP_FONT), size)
+        except OSError:
+            return ImageFont.load_default()
 
 _pixel_font_cache = None
 

@@ -1,0 +1,15 @@
+services:
+  quote0-burnout:
+    build: .
+    container_name: quote0-burnout
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      - REFRESH_INTERVAL=5m
+      - TZ=Asia/Shanghai
+    volumes:
+      - ./tmp:/app/tmp
+      # Optional: mount local OAuth credentials if not configured via environment variables
+      # - ~/.codex/auth.json:/root/.codex/auth.json:ro
+      # - ~/.claude/.credentials.json:/root/.claude/.credentials.json:ro
