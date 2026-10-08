@@ -67,8 +67,14 @@ fields (`resets_available`, `reset_expiry`) feed an extra Codex-only row.
 
 ### Claude (Claude Code OAuth / CLI)
 Token from the Claude Code CLI's local credentials (or `CLAUDE_ACCESS_TOKEN`).
-Falls back to `claude /usage` CLI. `five_hour` → "5h", `seven_day` → "Week"
-(`utilization` = percent used).
+On macOS those credentials live in the login Keychain (service
+`Claude Code-credentials`) — there is no `~/.claude/.credentials.json`.
+`five_hour` → "5h", `seven_day` → "Week" (`utilization` = percent used).
+The OAuth access token lives ~8h and **only Claude Code refreshes it**, so a
+fetch can 401 until the user next runs `claude`; the `claude /usage` CLI
+fallback no longer parses (2.1.293 prints a cost summary, not windows). A
+failed fetch therefore keeps the last good panel via `display._last_good`,
+marked `_cached` → `CLAUDE*`.
 
 ### DeepSeek (balance + billing window)
 `DEEPSEEK_API_KEY` (balance) + `DEEPSEEK_MODEL` for the pricing window
@@ -171,7 +177,10 @@ python3 -m pytest                      # test suite
    Dot. App Content Studio.
 5. **Dead providers don't error on screen.** A provider that fails auth/timeout is
    hidden; verify with `--debug-json` (a `status: no auth`/`HTTP 404` there is
-   expected for a genuinely unconfigured provider, not a render bug).
+   expected for a genuinely unconfigured provider, not a render bug). An
+   exception: claude keeps its last good panel marked `CLAUDE*` after a failed
+   fetch (expired OAuth token) — that is the fallback working, not staleness to
+   chase.
 6. **AGY is CLI-bound.** Don't "fix" AGY by switching to a REST endpoint — the API
    doesn't exist. Ensure the `agy` binary resolves (`~/.local/bin` must be on PATH
    or `AGY_CLI` set).

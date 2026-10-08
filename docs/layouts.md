@@ -29,7 +29,7 @@ Quote/0 屏幕 **296×152、黑白 1-bit**，由 `render.py` 渲染。布局引�
 - **Codex / Claude**：两行 16px `标签 剩余% 重置`；Codex 追加第三行 `RESET 1 · 29d`（同样是 16px，压缩 15px 行距，和 OpenCode 的 Mo 行一致 —— 手动重置次数 + 重置机会自身的过期时间，来自 `wham/rate-limit-reset-credits` 端点）
 - **OpenCode**：三行（5h / Wk / Mo，第三行压缩间距）
 - **DeepSeek**：VCR OSD 21px 余额大字 + 16px 档位徽章（`OFF ¥1.50 1h50m`）
-- **死掉的 provider 不会出现在网格里**（ok=False → 隐藏，而不是画错误单元格）；显式布局的剩余格留白
+- **死掉的 provider 不会出现在网格里**（ok=False → 隐藏，而不是画错误单元格）；显式布局的剩余格留白。例外：claude 抓取失败（OAuth token ~8h 过期、Claude Code 未跑）时沿用上一次成功的数据并标 `*`（`display._last_good`）
 
 ## 分隔线
 
