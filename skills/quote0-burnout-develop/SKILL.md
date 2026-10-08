@@ -74,7 +74,9 @@ The OAuth access token lives ~8h and **only Claude Code refreshes it**, so a
 fetch can 401 until the user next runs `claude`; the `claude /usage` CLI
 fallback no longer parses (2.1.293 prints a cost summary, not windows). A
 failed fetch therefore keeps the last good panel via `display._last_good`,
-marked `_cached` → `CLAUDE*`.
+marked `_cached` → `CLAUDE*`. A `no auth` failure (credentials removed) is
+**not** served that way — the panel goes away, as for any unauthenticated
+provider.
 
 ### DeepSeek (balance + billing window)
 `DEEPSEEK_API_KEY` (balance) + `DEEPSEEK_MODEL` for the pricing window

@@ -189,17 +189,25 @@ def refresh_provider_ts(p_sn: dict, prev: dict | None, now: str) -> None:
         p_sn["updated_at"] = prev.get("updated_at") or now
 
 
+# Failure statuses that mean "no usable credentials" rather than a transient
+# outage. The provider contract hides unauthenticated providers, so a panel
+# must not be resurrected from cache for these (e.g. credentials removed).
+_NO_CREDENTIAL_STATUSES = frozenset({"no auth"})
+
+
 def _last_good(fresh: dict, prev: dict | None) -> dict:
     """Serve a provider's previous good panel when the fresh fetch failed.
 
     Same contract as the codex snapshot-cache fallback, for a single
     provider: the panel keeps its last data and its last-change stamp (so it
     drifts back in recency priority like any unchanged provider) and is
-    marked cached, which the renderer draws as a '*' on the title. A provider
-    that has never succeeded keeps its failing snapshot, so an unauthenticated
-    provider is still hidden rather than shown as stale.
+    marked cached, which the renderer draws as a '*' on the title. Only
+    failures that can recover are served this way: a provider that has never
+    succeeded, or one that reports ``no auth`` (credentials removed), keeps
+    its failing snapshot so an unauthenticated provider stays hidden instead
+    of showing the previous account's data.
     """
-    if fresh.get("ok"):
+    if fresh.get("ok") or fresh.get("raw_status") in _NO_CREDENTIAL_STATUSES:
         return fresh
     prev = prev or {}
     if not prev.get("ok"):
@@ -209,14 +217,26 @@ def _last_good(fresh: dict, prev: dict | None) -> dict:
     return stale
 
 
+def _write_snapshot_cache(snap: dict) -> None:
+    """Persist a snapshot for the next run — best-effort, never fatal."""
+    try:
+        SNAPSHOT_CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
+        SNAPSHOT_CACHE_PATH.write_text(json.dumps(snap, indent=2), encoding="utf-8")
+    except OSError:
+        pass  # caching is best-effort — never fail a refresh over it
+
+
 def build_snapshot(layout: str | None = None) -> dict:
     """Fetch and build full snapshot, falling back to cache on failure.
 
-    On success the snapshot JSON is cached at SNAPSHOT_CACHE_PATH. If the
-    Codex API is unreachable the last cached codex snapshot is served,
-    marked `` (cached)`` in updated_at, with freshly-fetched claude/deepseek/
-    opencode panels overlaid. Cache writes are best-effort. A failed claude
-    fetch likewise keeps its last good panel, marked cached ('*' on the title).
+    Every run is cached at SNAPSHOT_CACHE_PATH (best-effort): that file is both
+    the codex fallback source below and the per-provider last-good source
+    ``_last_good`` reads. If the Codex API is unreachable the last good codex
+    snapshot is served, marked `` (cached)`` in updated_at, with the
+    freshly-fetched claude/deepseek/opencode panels overlaid and re-persisted
+    (so a provider that does answer keeps advancing its cached last good even
+    during a codex outage). A failed claude fetch keeps its last good panel,
+    marked cached ('*' on the title).
 
     layout: None → LAYOUT env (default auto). The snapshot carries the
     resolved layout, the configured-provider list, the global refresh
@@ -271,11 +291,7 @@ def build_snapshot(layout: str | None = None) -> dict:
         "_cached": False,
     }
     if codex.get("ok"):
-        try:
-            SNAPSHOT_CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
-            SNAPSHOT_CACHE_PATH.write_text(json.dumps(snap, indent=2), encoding="utf-8")
-        except OSError:
-            pass  # caching is best-effort — never fail a refresh over it
+        _write_snapshot_cache(snap)
         return snap
 
     # Codex fetch failed → serve the last good codex snapshot if we have one
@@ -295,9 +311,18 @@ def build_snapshot(layout: str | None = None) -> dict:
             # (Assignment also recreates keys missing from pre-upgrade caches.)
             cached["layout"] = snap["layout"]
             cached["configured"] = snap["configured"]
+            # Re-persist the merged snapshot: the providers that DID answer
+            # advance their cached last-good even while codex is down, so a
+            # later failure falls back to the most recent success, not a
+            # pre-outage value.
+            _write_snapshot_cache(cached)
             return cached
     except (OSError, ValueError):
         pass
+    # No cached codex to serve — still cache this run: claude's last good (and
+    # every other live panel) must persist on installs where codex is not
+    # configured at all, which the codex-guarded write above would never do.
+    _write_snapshot_cache(snap)
     return snap
 
 
