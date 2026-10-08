@@ -189,13 +189,34 @@ def refresh_provider_ts(p_sn: dict, prev: dict | None, now: str) -> None:
         p_sn["updated_at"] = prev.get("updated_at") or now
 
 
+def _last_good(fresh: dict, prev: dict | None) -> dict:
+    """Serve a provider's previous good panel when the fresh fetch failed.
+
+    Same contract as the codex snapshot-cache fallback, for a single
+    provider: the panel keeps its last data and its last-change stamp (so it
+    drifts back in recency priority like any unchanged provider) and is
+    marked cached, which the renderer draws as a '*' on the title. A provider
+    that has never succeeded keeps its failing snapshot, so an unauthenticated
+    provider is still hidden rather than shown as stale.
+    """
+    if fresh.get("ok"):
+        return fresh
+    prev = prev or {}
+    if not prev.get("ok"):
+        return fresh
+    stale = dict(prev)
+    stale["_cached"] = True
+    return stale
+
+
 def build_snapshot(layout: str | None = None) -> dict:
     """Fetch and build full snapshot, falling back to cache on failure.
 
     On success the snapshot JSON is cached at SNAPSHOT_CACHE_PATH. If the
     Codex API is unreachable the last cached codex snapshot is served,
     marked `` (cached)`` in updated_at, with freshly-fetched claude/deepseek/
-    opencode panels overlaid. Cache writes are best-effort.
+    opencode panels overlaid. Cache writes are best-effort. A failed claude
+    fetch likewise keeps its last good panel, marked cached ('*' on the title).
 
     layout: None → LAYOUT env (default auto). The snapshot carries the
     resolved layout, the configured-provider list, the global refresh
@@ -229,6 +250,11 @@ def build_snapshot(layout: str | None = None) -> dict:
                        ("deepseek", deepseek_sn), ("opencode", opencode_sn),
                        ("agy", agy_sn)):
         refresh_provider_ts(p_sn, (prev_snap or {}).get(name), now_stamp)
+
+    # Claude's OAuth access token is short-lived (~8h) and only Claude Code
+    # itself refreshes it, so a fetch can fail until the CLI is next run.
+    # Keep the last good panel ('*') instead of dropping the provider.
+    claude_sn = _last_good(claude_sn, (prev_snap or {}).get("claude"))
 
     snap = {
         "codex": codex_sn,

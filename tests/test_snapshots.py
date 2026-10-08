@@ -504,5 +504,89 @@ class IntervalParserTests(unittest.TestCase):
             display.parse_interval("invalid")
 
 
+class ProviderLastGoodTests(unittest.TestCase):
+    """display._last_good: a failed fetch keeps the provider's last panel."""
+
+    GOOD = {
+        "ok": True, "short_label": "5h", "short_used_percent": 42,
+        "short_reset": "2h13m", "long_label": "Week", "long_used_percent": 7,
+        "long_reset": "6d", "status": "ok", "raw_status": "",
+        "updated_at": "2026-10-07 09:20:06", "_fingerprint": "{}",
+    }
+    FAILED = {
+        "ok": False, "short_used_percent": None, "long_used_percent": None,
+        "status": "error", "raw_status": "HTTP 401",
+    }
+
+    def test_failed_fetch_keeps_previous_panel_marked_cached(self):
+        stale = display._last_good(dict(self.FAILED), dict(self.GOOD))
+        self.assertTrue(stale["ok"])
+        self.assertTrue(stale["_cached"], "the renderer's '*' marker needs _cached")
+        self.assertEqual(stale["short_used_percent"], 42)
+        self.assertEqual(stale["updated_at"], "2026-10-07 09:20:06",
+                         "unchanged data keeps its stamp so it drifts back in recency")
+
+    def test_previous_panel_is_not_mutated(self):
+        prev = dict(self.GOOD)
+        display._last_good(dict(self.FAILED), prev)
+        self.assertNotIn("_cached", prev)
+
+    def test_successful_fetch_passes_through_unmarked(self):
+        fresh = dict(self.GOOD)
+        self.assertIs(display._last_good(fresh, dict(self.GOOD)), fresh)
+        self.assertNotIn("_cached", fresh)
+
+    def test_no_previous_success_stays_failed(self):
+        for prev in (None, {}, dict(self.FAILED)):
+            with self.subTest(prev=prev):
+                self.assertFalse(display._last_good(dict(self.FAILED), prev)["ok"])
+
+
+class ClaudeLastGoodSnapshotTests(unittest.TestCase):
+    """build_snapshot wiring: a 401'd claude keeps rendering from the cache."""
+
+    def test_failed_claude_fetch_keeps_last_good_panel(self):
+        import json
+        import tempfile
+        from unittest.mock import patch
+
+        good = dict(ProviderLastGoodTests.GOOD)
+        with tempfile.TemporaryDirectory() as d:
+            cache = Path(d) / "last_snapshot.json"
+            cache.write_text(json.dumps({"claude": good}))
+            with patch("display.SNAPSHOT_CACHE_PATH", cache), \
+                 patch("display.get_claude_usage",
+                       return_value={"ok": False, "status": "HTTP 401",
+                                     "detail": "OAuth access token is invalid."}), \
+                 patch("display.get_codex_usage", return_value={"ok": False, "status": "no auth"}), \
+                 patch("display.get_codex_reset_credits", return_value={}), \
+                 patch("display.get_deepseek_balance", return_value={"ok": False}), \
+                 patch("display.get_opencode_usage", return_value={"ok": False}), \
+                 patch("display.get_agy_usage", return_value={"ok": False}):
+                snap = display.build_snapshot("2+2")
+
+        self.assertTrue(snap["claude"]["ok"])
+        self.assertTrue(snap["claude"]["_cached"])
+        self.assertEqual(snap["claude"]["short_used_percent"], 42)
+
+    def test_first_ever_failure_stays_hidden(self):
+        import tempfile
+        from unittest.mock import patch
+
+        with tempfile.TemporaryDirectory() as d:
+            with patch("display.SNAPSHOT_CACHE_PATH", Path(d) / "last_snapshot.json"), \
+                 patch("display.get_claude_usage",
+                       return_value={"ok": False, "status": "no auth"}), \
+                 patch("display.get_codex_usage", return_value={"ok": False, "status": "no auth"}), \
+                 patch("display.get_codex_reset_credits", return_value={}), \
+                 patch("display.get_deepseek_balance", return_value={"ok": False}), \
+                 patch("display.get_opencode_usage", return_value={"ok": False}), \
+                 patch("display.get_agy_usage", return_value={"ok": False}):
+                snap = display.build_snapshot("2+2")
+
+        self.assertFalse(snap["claude"]["ok"],
+                         "an unauthenticated provider stays hidden, not stale-shown")
+
+
 if __name__ == "__main__":
     unittest.main()
