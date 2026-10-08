@@ -504,5 +504,131 @@ class IntervalParserTests(unittest.TestCase):
             display.parse_interval("invalid")
 
 
+class ProviderLastGoodTests(unittest.TestCase):
+    """display._last_good: a failed fetch keeps the provider's last panel."""
+
+    GOOD = {
+        "ok": True, "short_label": "5h", "short_used_percent": 42,
+        "short_reset": "2h13m", "long_label": "Week", "long_used_percent": 7,
+        "long_reset": "6d", "status": "ok", "raw_status": "",
+        "updated_at": "2026-10-07 09:20:06", "_fingerprint": "{}",
+    }
+    FAILED = {
+        "ok": False, "short_used_percent": None, "long_used_percent": None,
+        "status": "error", "raw_status": "HTTP 401",
+    }
+
+    def test_failed_fetch_keeps_previous_panel_marked_cached(self):
+        stale = display._last_good(dict(self.FAILED), dict(self.GOOD))
+        self.assertTrue(stale["ok"])
+        self.assertTrue(stale["_cached"], "the renderer's '*' marker needs _cached")
+        self.assertEqual(stale["short_used_percent"], 42)
+        self.assertEqual(stale["updated_at"], "2026-10-07 09:20:06",
+                         "unchanged data keeps its stamp so it drifts back in recency")
+
+    def test_previous_panel_is_not_mutated(self):
+        prev = dict(self.GOOD)
+        display._last_good(dict(self.FAILED), prev)
+        self.assertNotIn("_cached", prev)
+
+    def test_successful_fetch_passes_through_unmarked(self):
+        fresh = dict(self.GOOD)
+        self.assertIs(display._last_good(fresh, dict(self.GOOD)), fresh)
+        self.assertNotIn("_cached", fresh)
+
+    def test_no_previous_success_stays_failed(self):
+        for prev in (None, {}, dict(self.FAILED)):
+            with self.subTest(prev=prev):
+                self.assertFalse(display._last_good(dict(self.FAILED), prev)["ok"])
+
+    def test_removed_credentials_are_not_restored(self):
+        no_auth = dict(self.FAILED, raw_status="no auth")
+        restored = display._last_good(no_auth, dict(self.GOOD))
+        self.assertFalse(restored["ok"],
+                         "a provider with no credentials must stay hidden, not stale-shown")
+        self.assertIs(restored, no_auth)
+
+    def test_expired_token_is_restored(self):
+        expired = dict(self.FAILED, raw_status="HTTP 401")
+        self.assertTrue(display._last_good(expired, dict(self.GOOD))["ok"])
+
+
+class ClaudeLastGoodSnapshotTests(unittest.TestCase):
+    """build_snapshot wiring: claude degrades to its cached panel, never silently."""
+
+    def _run(self, cache, claude_result, codex_result=None):
+        """One build_snapshot over a temp cache, every provider stubbed."""
+        from unittest.mock import patch
+
+        dead = {"ok": False, "status": "no auth"}
+        with patch("display.SNAPSHOT_CACHE_PATH", cache), \
+             patch("display.get_claude_usage", return_value=claude_result), \
+             patch("display.get_codex_usage", return_value=codex_result or dead), \
+             patch("display.get_codex_reset_credits", return_value={}), \
+             patch("display.get_deepseek_balance", return_value=dict(dead)), \
+             patch("display.get_opencode_usage", return_value=dict(dead)), \
+             patch("display.get_agy_usage", return_value=dict(dead)):
+            return display.build_snapshot("2+2")
+
+    def _cache_with(self, d, claude):
+        import json
+        cache = Path(d) / "last_snapshot.json"
+        cache.write_text(json.dumps({"claude": claude}))
+        return cache
+
+    def test_failed_claude_fetch_keeps_last_good_panel(self):
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as d:
+            cache = self._cache_with(d, dict(ProviderLastGoodTests.GOOD))
+            snap = self._run(cache, {"ok": False, "status": "HTTP 401",
+                                     "detail": "OAuth access token is invalid."})
+
+        self.assertTrue(snap["claude"]["ok"])
+        self.assertTrue(snap["claude"]["_cached"])
+        self.assertEqual(snap["claude"]["short_used_percent"], 42)
+
+    def test_first_ever_failure_stays_hidden(self):
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as d:
+            snap = self._run(Path(d) / "last_snapshot.json", {"ok": False, "status": "no auth"})
+
+        self.assertFalse(snap["claude"]["ok"],
+                         "an unauthenticated provider stays hidden, not stale-shown")
+
+    def test_removed_credentials_hide_the_panel(self):
+        """Cached data must not outlive the credentials that produced it."""
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as d:
+            cache = self._cache_with(d, dict(ProviderLastGoodTests.GOOD))
+            snap = self._run(cache, {"ok": False, "status": "no auth",
+                                     "detail": "No Claude credentials at ~/.claude."})
+
+        self.assertFalse(snap["claude"]["ok"],
+                         "credentials removed → the panel goes away instead of showing the old account")
+
+    def test_claude_success_persists_without_codex(self):
+        """A claude-only install gets the fallback: codex never writes the cache."""
+        import json
+        import tempfile
+
+        raw_ok = {"ok": True, "raw": {"five_hour": {"utilization": 42},
+                                      "seven_day": {"utilization": 7}}}
+        with tempfile.TemporaryDirectory() as d:
+            cache = Path(d) / "last_snapshot.json"
+            first = self._run(cache, raw_ok)
+            self.assertTrue(first["claude"]["ok"])
+            self.assertTrue(json.loads(cache.read_text())["claude"]["ok"],
+                            "claude's success must be cached even when codex never succeeds")
+
+            second = self._run(cache, {"ok": False, "status": "HTTP 401"})
+
+        self.assertTrue(second["claude"]["ok"], "the second run restores the persisted success")
+        self.assertTrue(second["claude"]["_cached"])
+        self.assertEqual(second["claude"]["short_used_percent"], 42)
+
+
 if __name__ == "__main__":
     unittest.main()
