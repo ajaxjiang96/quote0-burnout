@@ -154,6 +154,11 @@ def _resolve_second_panel(deepseek_sn: dict, opencode_sn: dict) -> str:
 _VOLATILE_KEYS = {
     "updated_at", "_fingerprint", "_cached",
     "reset", "short_reset", "long_reset", "countdown",
+    # Seconds-remaining integer behind a countdown (deepseek's `ends_in`) and
+    # codex's humanized reset-credit expiry — both tick on every cycle or hour
+    # and must not count as a data change, or the provider re-stamps forever
+    # and monopolizes the most-visible cell.
+    "ends_in", "reset_expiry",
 }
 
 

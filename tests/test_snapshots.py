@@ -478,6 +478,61 @@ class ProviderTimestampTests(unittest.TestCase):
         display.refresh_provider_ts(changed, first, "2026-09-04 09:30:00")
         self.assertEqual(changed["updated_at"], "2026-09-04 09:30:00")
 
+    # DeepSeek's snapshot carries `ends_in` (seconds left in the billing
+    # window) next to the rendered `countdown`. Both tick every cycle, so an
+    # unexcluded `ends_in` re-stamped deepseek on every run and pinned its
+    # always-idle panel to the most-visible cell.
+    DEEPSEEK = {
+        "ok": True, "balance": 34.37, "currency": "CNY", "symbol": "¥",
+        "status": "ok", "raw_status": "", "model": "deepseek-v4-flash",
+        "window": "OFF", "factor": 0.5, "price_in": 1.0, "price_out": 4.0,
+        "ends_in": 1004, "countdown": "16m", "next_window": "PEAK",
+    }
+
+    def test_fingerprint_ignores_deepseek_window_countdown(self):
+        a = display._provider_fingerprint(dict(self.DEEPSEEK))
+        b = display._provider_fingerprint(
+            dict(self.DEEPSEEK, ends_in=704, countdown="11m"))
+        self.assertEqual(a, b, "ends_in ticking must not register as a change")
+
+    def test_idle_deepseek_keeps_its_stamp(self):
+        first = dict(self.DEEPSEEK)
+        display.refresh_provider_ts(first, None, "2026-09-04 09:00:00")
+        second = dict(self.DEEPSEEK, ends_in=704, countdown="11m")
+        display.refresh_provider_ts(second, first, "2026-09-04 09:05:00")
+        self.assertEqual(second["updated_at"], "2026-09-04 09:00:00",
+                         "an idle deepseek must drift back in recency")
+
+    def test_deepseek_balance_change_still_restamps(self):
+        first = dict(self.DEEPSEEK)
+        display.refresh_provider_ts(first, None, "2026-09-04 09:00:00")
+        spent = dict(self.DEEPSEEK, balance=30.11, ends_in=704, countdown="11m")
+        display.refresh_provider_ts(spent, first, "2026-09-04 09:05:00")
+        self.assertEqual(spent["updated_at"], "2026-09-04 09:05:00")
+
+    def test_deepseek_window_switch_still_restamps(self):
+        first = dict(self.DEEPSEEK)
+        display.refresh_provider_ts(first, None, "2026-09-04 09:00:00")
+        peak = dict(self.DEEPSEEK, window="PEAK", factor=1.0,
+                    price_in=2.0, price_out=8.0, ends_in=704, countdown="11m")
+        display.refresh_provider_ts(peak, first, "2026-09-04 09:05:00")
+        self.assertEqual(peak["updated_at"], "2026-09-04 09:05:00",
+                         "a billing-window switch is a real change")
+
+    def test_fingerprint_ignores_codex_reset_expiry(self):
+        a = display._provider_fingerprint({
+            "ok": True, "short_used_percent": 12, "resets_available": 2,
+            "reset_expiry": "2d22h"})
+        b = display._provider_fingerprint({
+            "ok": True, "short_used_percent": 12, "resets_available": 2,
+            "reset_expiry": "2d21h"})
+        self.assertEqual(a, b, "a ticking reset-credit expiry is not a change")
+
+    def test_fingerprint_tracks_reset_credit_count(self):
+        a = display._provider_fingerprint({"ok": True, "resets_available": 2})
+        b = display._provider_fingerprint({"ok": True, "resets_available": 1})
+        self.assertNotEqual(a, b)
+
 
 class IntervalParserTests(unittest.TestCase):
     def test_parse_interval_valid_units(self):
