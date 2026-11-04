@@ -73,7 +73,22 @@ python display.py --check      # 自检
 python display.py --list-tasks # 列出任务槽位
 ```
 
-## 定时任务（macOS launchd，每 5 分钟）
+## 定时调度与部署
+
+### Docker 容器部署（推荐）
+
+```bash
+cp config.example.env .env
+# 编辑 .env 配置设备 ID 与 Token
+
+# 启动容器（默认通过 --interval 5m 循环自调度）
+docker compose up -d
+
+# 查看日志
+docker compose logs -f
+```
+
+### macOS launchd（每 5 分钟）
 
 ```bash
 cp scripts/com.example.quote0-burnout.plist.example ~/Library/LaunchAgents/
