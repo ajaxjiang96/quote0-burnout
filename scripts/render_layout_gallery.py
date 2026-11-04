@@ -69,7 +69,7 @@ def _snap(layout, providers, cached=False):
         "second_panel": "opencode",
         "layout": layout,
         "configured": list(providers),
-        "updated_at": "16:40 (cached)" if cached else TS,
+        "refreshed_at": "16:40 (cached)" if cached else TS,
         "_cached": cached,
     })
     return s

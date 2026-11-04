@@ -36,7 +36,7 @@ def _full_snap(layout="2+2", live=None, codex=None, claude=None, deepseek=None, 
     snap.update({
         "second_panel": "opencode", "layout": layout,
         "configured": ["codex", "claude", "deepseek", "opencode"],
-        "updated_at": "16:40",
+        "refreshed_at": "16:40",
     })
     return snap
 
@@ -82,8 +82,8 @@ class PlanLayoutTests(unittest.TestCase):
         # recency beats the tiebreak: deepseek changed → it takes the slot
         for name, p_sn in snap.items():
             if isinstance(p_sn, dict) and p_sn.get("ok"):
-                p_sn["updated_at"] = "2026-09-04 07:00:00"
-        snap["deepseek"]["updated_at"] = "2026-09-04 09:00:00"
+                p_sn["changed_at"] = "2026-09-04 07:00:00"
+        snap["deepseek"]["changed_at"] = "2026-09-04 09:00:00"
         mode, jobs = render._plan_layout(snap)
         self.assertEqual([name for name, _ in jobs], ["deepseek", "codex"])
 
@@ -211,7 +211,7 @@ class GridRenderTests(unittest.TestCase):
 
     def test_refresh_time_rendered_once_top_right(self):
         snap = _full_snap("2+2")
-        snap["updated_at"] = "09:15"
+        snap["refreshed_at"] = "09:15"
         img = self._render(snap)
         px = img.load()
         # top-right strip of the whole screen → painted (the one global ts)
@@ -301,12 +301,12 @@ class OrderPanelsTests(unittest.TestCase):
     """_order_panels: recency-first ordering with canonical tiebreak."""
 
     def _snap(self, stamps, live):
-        snap = {"layout": "2+2", "updated_at": "16:40"}
+        snap = {"layout": "2+2", "refreshed_at": "16:40"}
         for name in ("codex", "claude", "deepseek", "opencode"):
             if name in live:
                 sn = {"ok": True}
                 if name in stamps:
-                    sn["updated_at"] = stamps[name]
+                    sn["changed_at"] = stamps[name]
                 snap[name] = sn
             else:
                 snap[name] = _NOT_OK
@@ -369,8 +369,8 @@ class OrderPanelsTests(unittest.TestCase):
 
 class CachedTimestampTests(unittest.TestCase):
     def test_short_marker_for_cached_ts(self):
-        self.assertEqual(render._grid_ts({"updated_at": "16:40 (cached)", "_cached": True}), "16:40*")
-        self.assertEqual(render._grid_ts({"updated_at": "16:40", "_cached": False}), "16:40")
+        self.assertEqual(render._grid_ts({"refreshed_at": "16:40 (cached)", "_cached": True}), "16:40*")
+        self.assertEqual(render._grid_ts({"refreshed_at": "16:40", "_cached": False}), "16:40")
 
     def test_cached_ts_does_not_collide_with_ne_title(self):
         # The fixture that actually stresses the reserve bound: both
@@ -380,7 +380,7 @@ class CachedTimestampTests(unittest.TestCase):
         # assertion's empty band — it could not fail on its own fixture.
         snap = _full_snap("2+2", live=["deepseek", "opencode"])
         snap["_cached"] = True
-        snap["updated_at"] = "16:40 (cached)"
+        snap["refreshed_at"] = "16:40 (cached)"
         png = render_image(snap)
         img = Image.open(io.BytesIO(png))
         self.assertEqual(img.size, (296, 152))

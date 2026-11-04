@@ -122,9 +122,15 @@ snapshot = {
     "agy":      {"ok": True, "short_label": "5h", "short_used_percent": 35,
                  "short_reset": "3h47m", "long_label": "Week",
                  "long_used_percent": 6, "long_reset": "6d", "status": "ok"},
-    "layout": "auto", "second_panel": "opencode", "updated_at": "16:40",
+    "layout": "auto", "second_panel": "opencode", "refreshed_at": "16:40",
 }
 ```
+
+Each provider also carries two stamps (omitted above): `fetched_at` — the last
+successful fetch, which advances every cycle the provider answers — and
+`changed_at` — the last time its non-volatile data actually changed, which is
+what orders the cells. A failed fetch holds both; a cache-served panel keeps the
+previous run's values. Both are excluded from the change fingerprint.
 
 Status rules: `short_used_percent`/`long_used_percent` `<70%` → ok, `70-89%` → warn,
 `≥90%` → hot. DeepSeek `≥10` balance → ok, `3-10` → warn, `<3`/unavailable → hot.
@@ -137,9 +143,11 @@ as error cells.
   count (`0/1`→stack, `2`→1+1, `3`→1+2, `4`→2+2).
 - Grid engine (`_render_grid`) draws quarter (148×76) and half (296×76) cells;
   `stack` falls back to the legacy `_render_v5` column layout.
-- **Recency ordering**: `_order_panels` sorts live providers by `updated_at` desc
+- **Recency ordering**: `_order_panels` sorts live providers by `changed_at` desc
   (the LAST data-change time via fingerprinting), ties fall back to the canonical
   order (`codex, claude, deepseek, opencode, agy`). Top-left is most visible.
+  Do not touch `fetched_at` in the ordering: it advances on every cycle, so it
+  would pin one provider to the top cell exactly like the old `ends_in` bug.
 - **Cached `*`**: a provider served from cache gets `*` on its title (e.g. `CODEX*`).
 - Fonts: PixelOperator 16px (titles/labels), Minecraftia 8px (timestamp/notes),
   VCR OSD 21px (DeepSeek balance). See `references/eink-design.md` for the full

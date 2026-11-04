@@ -456,27 +456,59 @@ class ProviderTimestampTests(unittest.TestCase):
         b = display._provider_fingerprint({"ok": True, "short_used_percent": 31})
         self.assertNotEqual(a, b)
 
-    def test_refresh_provider_ts_first_run(self):
+    def test_stamp_provider_times_first_run(self):
         now = "2026-09-04 09:00:00"
         sn = {"ok": True, "short_used_percent": 28}
-        display.refresh_provider_ts(sn, None, now)
-        self.assertEqual(sn["updated_at"], now)
+        display.stamp_provider_times(sn, None, now)
+        self.assertEqual(sn["changed_at"], now)
+        self.assertEqual(sn["fetched_at"], now)
         self.assertIn("_fingerprint", sn)
 
-    def test_refresh_provider_ts_unchanged_keeps_stamp(self):
+    def test_stamp_provider_times_unchanged_keeps_stamp(self):
         now = "2026-09-04 09:00:00"
         first = {"ok": True, "short_used_percent": 28}
-        display.refresh_provider_ts(first, None, now)
+        display.stamp_provider_times(first, None, now)
         second = {"ok": True, "short_used_percent": 28, "short_reset": "2h13m"}
-        display.refresh_provider_ts(second, first, "2026-09-04 09:30:00")
-        self.assertEqual(second["updated_at"], now, "unchanged data keeps its old stamp")
+        display.stamp_provider_times(second, first, "2026-09-04 09:30:00")
+        self.assertEqual(second["changed_at"], now, "unchanged data keeps its old stamp")
+        self.assertEqual(second["fetched_at"], "2026-09-04 09:30:00",
+                         "a fetch that found nothing new still advances fetched_at")
 
-    def test_refresh_provider_ts_changed_stamps_now(self):
+    def test_stamp_provider_times_changed_stamps_now(self):
         first = {"ok": True, "short_used_percent": 28}
-        display.refresh_provider_ts(first, None, "2026-09-04 09:00:00")
+        display.stamp_provider_times(first, None, "2026-09-04 09:00:00")
         changed = {"ok": True, "short_used_percent": 31}
-        display.refresh_provider_ts(changed, first, "2026-09-04 09:30:00")
-        self.assertEqual(changed["updated_at"], "2026-09-04 09:30:00")
+        display.stamp_provider_times(changed, first, "2026-09-04 09:30:00")
+        self.assertEqual(changed["changed_at"], "2026-09-04 09:30:00")
+        self.assertEqual(changed["fetched_at"], "2026-09-04 09:30:00")
+
+    def test_stamp_provider_times_failure_holds_both(self):
+        prev = {"ok": True, "short_used_percent": 28}
+        display.stamp_provider_times(prev, None, "2026-09-04 09:00:00")
+        failed = {"ok": False, "status": "error", "raw_status": "HTTP 401"}
+        display.stamp_provider_times(failed, prev, "2026-09-04 09:05:00")
+        self.assertEqual(failed["changed_at"], "2026-09-04 09:00:00")
+        self.assertEqual(failed["fetched_at"], "2026-09-04 09:00:00",
+                         "a failed fetch must not claim to have read anything")
+
+    def test_stamp_provider_times_never_fetched_has_no_stamps(self):
+        for prev in (None, {}, {"ok": False, "status": "no auth"}):
+            with self.subTest(prev=prev):
+                failed = {"ok": False, "status": "no auth"}
+                display.stamp_provider_times(failed, prev, "2026-09-04 09:05:00")
+                self.assertIsNone(failed["fetched_at"])
+                self.assertIsNone(failed["changed_at"])
+
+    def test_stamp_provider_times_reads_legacy_cache(self):
+        legacy = {"ok": True, "short_used_percent": 28}
+        display.stamp_provider_times(legacy, None, "2026-09-04 09:00:00")
+        legacy.pop("changed_at")
+        legacy.pop("fetched_at")
+        legacy["updated_at"] = "2026-09-04 08:00:00"
+        fresh = {"ok": True, "short_used_percent": 28}
+        display.stamp_provider_times(fresh, legacy, "2026-09-04 09:05:00")
+        self.assertEqual(fresh["changed_at"], "2026-09-04 08:00:00",
+                         "a cache written before the rename must not mass re-stamp")
 
     # DeepSeek's snapshot carries `ends_in` (seconds left in the billing
     # window) next to the rendered `countdown`. Both tick every cycle, so an
@@ -497,26 +529,26 @@ class ProviderTimestampTests(unittest.TestCase):
 
     def test_idle_deepseek_keeps_its_stamp(self):
         first = dict(self.DEEPSEEK)
-        display.refresh_provider_ts(first, None, "2026-09-04 09:00:00")
+        display.stamp_provider_times(first, None, "2026-09-04 09:00:00")
         second = dict(self.DEEPSEEK, ends_in=704, countdown="11m")
-        display.refresh_provider_ts(second, first, "2026-09-04 09:05:00")
-        self.assertEqual(second["updated_at"], "2026-09-04 09:00:00",
+        display.stamp_provider_times(second, first, "2026-09-04 09:05:00")
+        self.assertEqual(second["changed_at"], "2026-09-04 09:00:00",
                          "an idle deepseek must drift back in recency")
 
     def test_deepseek_balance_change_still_restamps(self):
         first = dict(self.DEEPSEEK)
-        display.refresh_provider_ts(first, None, "2026-09-04 09:00:00")
+        display.stamp_provider_times(first, None, "2026-09-04 09:00:00")
         spent = dict(self.DEEPSEEK, balance=30.11, ends_in=704, countdown="11m")
-        display.refresh_provider_ts(spent, first, "2026-09-04 09:05:00")
-        self.assertEqual(spent["updated_at"], "2026-09-04 09:05:00")
+        display.stamp_provider_times(spent, first, "2026-09-04 09:05:00")
+        self.assertEqual(spent["changed_at"], "2026-09-04 09:05:00")
 
     def test_deepseek_window_switch_still_restamps(self):
         first = dict(self.DEEPSEEK)
-        display.refresh_provider_ts(first, None, "2026-09-04 09:00:00")
+        display.stamp_provider_times(first, None, "2026-09-04 09:00:00")
         peak = dict(self.DEEPSEEK, window="PEAK", factor=1.0,
                     price_in=2.0, price_out=8.0, ends_in=704, countdown="11m")
-        display.refresh_provider_ts(peak, first, "2026-09-04 09:05:00")
-        self.assertEqual(peak["updated_at"], "2026-09-04 09:05:00",
+        display.stamp_provider_times(peak, first, "2026-09-04 09:05:00")
+        self.assertEqual(peak["changed_at"], "2026-09-04 09:05:00",
                          "a billing-window switch is a real change")
 
     def test_fingerprint_ignores_codex_reset_expiry(self):
@@ -566,7 +598,8 @@ class ProviderLastGoodTests(unittest.TestCase):
         "ok": True, "short_label": "5h", "short_used_percent": 42,
         "short_reset": "2h13m", "long_label": "Week", "long_used_percent": 7,
         "long_reset": "6d", "status": "ok", "raw_status": "",
-        "updated_at": "2026-10-07 09:20:06", "_fingerprint": "{}",
+        "fetched_at": "2026-10-07 09:20:06",
+        "changed_at": "2026-10-07 09:20:06", "_fingerprint": "{}",
     }
     FAILED = {
         "ok": False, "short_used_percent": None, "long_used_percent": None,
@@ -578,7 +611,7 @@ class ProviderLastGoodTests(unittest.TestCase):
         self.assertTrue(stale["ok"])
         self.assertTrue(stale["_cached"], "the renderer's '*' marker needs _cached")
         self.assertEqual(stale["short_used_percent"], 42)
-        self.assertEqual(stale["updated_at"], "2026-10-07 09:20:06",
+        self.assertEqual(stale["changed_at"], "2026-10-07 09:20:06",
                          "unchanged data keeps its stamp so it drifts back in recency")
 
     def test_previous_panel_is_not_mutated(self):
