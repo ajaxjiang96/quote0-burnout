@@ -94,7 +94,7 @@ class ClaudeRenderTests(unittest.TestCase):
                 "long_reset": "3d4h",
                 "status": "ok",
             },
-            "updated_at": "16:40",
+            "refreshed_at": "16:40",
         })
 
         image = Image.open(io.BytesIO(png))

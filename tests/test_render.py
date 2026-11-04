@@ -68,19 +68,19 @@ class RenderSmokeTests(unittest.TestCase):
         # the user's real setup: Claude unauth -> hidden, OpenCode full 3 rows
         snap = {"codex": _codex(single=True), "claude": _claude(auth=False),
                 "deepseek": _deepseek(ok=False), "opencode": _opencode(),
-                "second_panel": "opencode", "updated_at": "13:30"}
+                "second_panel": "opencode", "refreshed_at": "13:30"}
         self._render(snap)
 
     def test_three_panels_compact_opencode(self):
         snap = {"codex": _codex(), "claude": _claude(),
                 "deepseek": _deepseek(ok=False), "opencode": _opencode(),
-                "second_panel": "opencode", "updated_at": "13:30"}
+                "second_panel": "opencode", "refreshed_at": "13:30"}
         self._render(snap)
 
     def test_deepseek_second_panel(self):
         snap = {"codex": _codex(single=True), "claude": _claude(auth=False),
                 "deepseek": _deepseek(), "opencode": _opencode(),
-                "second_panel": "deepseek", "updated_at": "13:30"}
+                "second_panel": "deepseek", "refreshed_at": "13:30"}
         self._render(snap)
 
     def test_agy_render_in_grid_and_half(self):
@@ -89,7 +89,7 @@ class RenderSmokeTests(unittest.TestCase):
             "layout": "1+1",
             "codex": _codex(),
             "agy": _agy(),
-            "updated_at": "14:00",
+            "refreshed_at": "14:00",
         }
         self._render(snap_half)
 
@@ -100,7 +100,7 @@ class RenderSmokeTests(unittest.TestCase):
             "claude": _claude(ok=True),
             "deepseek": _deepseek(),
             "agy": _agy(),
-            "updated_at": "14:00",
+            "refreshed_at": "14:00",
         }
         self._render(snap_grid)
 
@@ -108,7 +108,7 @@ class RenderSmokeTests(unittest.TestCase):
         snap = {"codex": _codex(single=True), "claude": _claude(auth=False),
                 "deepseek": _deepseek(ok=False),
                 "opencode": {"ok": False, "status": "error", "raw_status": "no key"},
-                "second_panel": "none", "updated_at": "13:30"}
+                "second_panel": "none", "refreshed_at": "13:30"}
         self._render(snap)
 
     def test_nothing_renders_but_does_not_crash(self):
@@ -116,7 +116,7 @@ class RenderSmokeTests(unittest.TestCase):
                 "claude": _claude(auth=False),
                 "deepseek": _deepseek(ok=False),
                 "opencode": {"ok": False, "status": "error", "raw_status": "no key"},
-                "second_panel": "none", "updated_at": "13:30"}
+                "second_panel": "none", "refreshed_at": "13:30"}
         png = render_image(snap)
         img = Image.open(io.BytesIO(png))
         self.assertEqual(img.size, (296, 152))
@@ -124,7 +124,7 @@ class RenderSmokeTests(unittest.TestCase):
     def test_unknown_second_panel_falls_back_to_ok_provider(self):
         snap = {"codex": _codex(single=True), "claude": _claude(auth=False),
                 "deepseek": _deepseek(ok=False), "opencode": _opencode(),
-                "second_panel": "bogus", "updated_at": "13:30"}
+                "second_panel": "bogus", "refreshed_at": "13:30"}
         # resolution falls back to opencode (the only ok second provider)
         self._render(snap)
 

@@ -195,7 +195,7 @@ def _price_text(sym: str, v):
 def _render_v5(img: Image.Image, draw: ImageDraw.ImageDraw, snap: dict):
     cx = snap.get("codex", {})
     cl = snap.get("claude", {})
-    ts  = snap.get("updated_at", datetime.now().strftime("%H:%M"))
+    ts  = snap.get("refreshed_at", datetime.now().strftime("%H:%M"))
 
     label = _op()       # 16px PixelOperator — section labels, row text
     small = _pixel()    # 8px Minecraftia — timestamp
@@ -457,16 +457,21 @@ def _resolve_auto(snapshot) -> str:
 def _order_panels(snapshot, live, n) -> list[str]:
     """Recency order: most-recently-changed provider first.
 
-    Each provider's updated_at is its LAST DATA-CHANGE time (computed in
+    Each provider's changed_at is its LAST DATA-CHANGE time (computed in
     display.build_snapshot by fingerprinting against the previous cached
     snapshot; an unchanged provider keeps its older stamp and drifts back
     in priority). Ties — first run, or several providers changed in the
     same cycle — fall back to canonical order. The first n live providers
-    fill the layout's cells in order (top-left = most visible)."""
+    fill the layout's cells in order (top-left = most visible). Caches
+    written before the changed_at rename carry `updated_at` instead."""
+    def _stamp(p):
+        sn = snapshot.get(p, {})
+        return sn.get("changed_at") or sn.get("updated_at") or ""
+
     return sorted(
         live,
         key=lambda p: (
-            snapshot.get(p, {}).get("updated_at", ""),
+            _stamp(p),
             -_PROVIDER_ORDER.index(p),
         ),
         reverse=True,
@@ -694,11 +699,11 @@ def _half_row_y(cell, y_top, n_rows) -> int:
 
 
 def _grid_ts(snap) -> str:
-    """Grid-mode refresh-time label. A cache fallback sets updated_at to
+    """Grid-mode refresh-time label. A cache fallback sets refreshed_at to
     '16:40 (cached)' — too wide for the header strip (it collides with the
     top-right cell title); shorten to '16:40*' (the '*' stale marker was
     reserved by #12 anyway)."""
-    ts = snap.get("updated_at", "")
+    ts = snap.get("refreshed_at", "")
     if snap.get("_cached") and " " in ts:
         return ts.split()[0] + "*"
     return ts
@@ -791,7 +796,7 @@ if __name__ == "__main__":
                      "long_used_percent": 8, "long_reset": "4d2h",
                      "status": "ok"},
         "second_panel": "opencode",
-        "updated_at": "16:40",
+        "refreshed_at": "16:40",
         "layout": "2+2",
         "configured": ["codex", "claude", "deepseek", "opencode"],
     }

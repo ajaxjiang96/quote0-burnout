@@ -152,8 +152,16 @@ def _resolve_second_panel(deepseek_sn: dict, opencode_sn: dict) -> str:
 # are internal bookkeeping — excluded from the change fingerprint so that
 # ticking timers never register as a data change.
 _VOLATILE_KEYS = {
-    "updated_at", "_fingerprint", "_cached",
+    "_fingerprint", "_cached",
     "reset", "short_reset", "long_reset", "countdown",
+    # Seconds-remaining integer behind a countdown (deepseek's `ends_in`) and
+    # codex's humanized reset-credit expiry — both tick on every cycle or hour
+    # and must not count as a data change, or the provider re-stamps forever
+    # and monopolizes the most-visible cell.
+    "ends_in", "reset_expiry",
+    # Stamps are bookkeeping, not data. `updated_at` is the pre-rename key,
+    # kept here so a cache written by an older build still fingerprints clean.
+    "changed_at", "fetched_at", "updated_at",
 }
 
 
@@ -173,20 +181,33 @@ def _provider_fingerprint(p_sn: dict) -> str:
     return json.dumps(_strip_volatile(p_sn), sort_keys=True, default=str)
 
 
-def refresh_provider_ts(p_sn: dict, prev: dict | None, now: str) -> None:
-    """Stamp a provider's updated_at as its LAST DATA-CHANGE time.
+def stamp_provider_times(p_sn: dict, prev: dict | None, now: str) -> None:
+    """Stamp a provider's ``fetched_at`` and ``changed_at``.
 
-    The fingerprint is compared against the previous snapshot (served
-    through the snapshot cache); unchanged data keeps its older stamp so
-    the provider drifts back in recency priority, changed data gets now.
-    First run (no cache / no previous fingerprint): now."""
+    ``fetched_at`` is the LAST SUCCESSFUL FETCH. It advances every cycle the
+    provider answers and holds at its last answer through a failure, so a
+    reader can tell "fetched, nothing changed" from "not fetched at all".
+    A provider that fails before ever answering has no ``fetched_at``.
+
+    ``changed_at`` is the LAST DATA CHANGE, and it alone orders the cells.
+    The fingerprint is compared against the previous snapshot (served through
+    the snapshot cache); unchanged data keeps its older stamp so the provider
+    drifts back in recency priority, changed data gets now. First run (no
+    cache / no previous fingerprint): now.
+    """
     fp = _provider_fingerprint(p_sn)
     p_sn["_fingerprint"] = fp  # persisted via the cache for the next run
     prev = prev or {}
-    if prev.get("_fingerprint") != fp:
-        p_sn["updated_at"] = now
-    else:
-        p_sn["updated_at"] = prev.get("updated_at") or now
+    # Caches written before the rename carry `updated_at` only.
+    prev_fetched = prev.get("fetched_at") or prev.get("updated_at")
+    prev_changed = prev.get("changed_at") or prev.get("updated_at")
+    if not p_sn.get("ok"):
+        # Nothing was read: both stamps stay where the last good run left them.
+        p_sn["fetched_at"] = prev_fetched
+        p_sn["changed_at"] = prev_changed
+        return
+    p_sn["fetched_at"] = now
+    p_sn["changed_at"] = now if prev.get("_fingerprint") != fp else (prev_changed or now)
 
 
 # Failure statuses that mean "no usable credentials" rather than a transient
@@ -232,20 +253,19 @@ def build_snapshot(layout: str | None = None) -> dict:
     Every run is cached at SNAPSHOT_CACHE_PATH (best-effort): that file is both
     the codex fallback source below and the per-provider last-good source
     ``_last_good`` reads. If the Codex API is unreachable the last good codex
-    snapshot is served, marked `` (cached)`` in updated_at, with the
+    snapshot is served, marked `` (cached)`` in refreshed_at, with the
     freshly-fetched claude/deepseek/opencode panels overlaid and re-persisted
     (so a provider that does answer keeps advancing its cached last good even
     during a codex outage). A failed claude fetch keeps its last good panel,
     marked cached ('*' on the title).
 
     layout: None → LAYOUT env (default auto). The snapshot carries the
-    resolved layout, the configured-provider list, the global refresh
-    time (updated_at, rendered at the screen top-right), and a per-provider
-    change-detection stamp — the provider data here can be ordered
-    most-recently-changed first (#10).
+    resolved layout, the configured-provider list, the global refresh label
+    (refreshed_at, rendered at the screen top-right), and per provider a
+    fetched_at plus the changed_at that orders the cells (#10).
     """
     layout = layout if layout is not None else _normalize_layout(LAYOUT_ENV)
-    now = datetime.now().strftime("%H:%M")                    # rendered global ts
+    refreshed_at = datetime.now().strftime("%H:%M")            # rendered global ts
     now_stamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")  # sortable per-provider stamp
 
     codex = get_codex_usage()
@@ -269,7 +289,7 @@ def build_snapshot(layout: str | None = None) -> dict:
     for name, p_sn in (("codex", codex_sn), ("claude", claude_sn),
                        ("deepseek", deepseek_sn), ("opencode", opencode_sn),
                        ("agy", agy_sn)):
-        refresh_provider_ts(p_sn, (prev_snap or {}).get(name), now_stamp)
+        stamp_provider_times(p_sn, (prev_snap or {}).get(name), now_stamp)
 
     # Claude's OAuth access token is short-lived (~8h) and only Claude Code
     # itself refreshes it, so a fetch can fail until the CLI is next run.
@@ -287,7 +307,7 @@ def build_snapshot(layout: str | None = None) -> dict:
         # reserved for the #15 公版 provider contract — the grid engine
         # orders cells by change recency (#10), not by this list.
         "configured": configured_providers(),
-        "updated_at": now,
+        "refreshed_at": refreshed_at,
         "_cached": False,
     }
     if codex.get("ok"):
@@ -298,7 +318,7 @@ def build_snapshot(layout: str | None = None) -> dict:
     try:
         cached = json.loads(SNAPSHOT_CACHE_PATH.read_text(encoding="utf-8"))
         if cached.get("codex", {}).get("ok"):
-            cached["updated_at"] = snap["updated_at"] + " (cached)"
+            cached["refreshed_at"] = snap["refreshed_at"] + " (cached)"
             cached["_cached"] = True
             cached["claude"] = snap["claude"]  # refresh what is fresh
             cached["deepseek"] = snap["deepseek"]
@@ -428,7 +448,7 @@ def run(preview: bool = False, text_mode: bool = False, layout: str | None = Non
             tag = "OpenCode" if snapshot.get("second_panel") == "opencode" else "DeepSeek"
             print(f"{tag}:  {second_text.replace(chr(10), ' / ')}")
 
-        now = snapshot["updated_at"]
+        now = snapshot["refreshed_at"]
         message = f"Codex {cx_text}\nClaude {cl_text}"
         if second_text:
             message += f"\n{snapshot.get('second_panel', 'deepseek').capitalize()} {second_text}"
@@ -629,7 +649,7 @@ def check() -> int:
                 "codex": build_codex_snapshot(get_codex_usage() if codex_ok else {"ok": False, "status": "n/a"}),
                 "claude": build_claude_snapshot(get_claude_usage() if claude_ok else {"ok": False, "status": "n/a"}),
                 "agy": build_agy_snapshot(get_agy_usage() if agy_ok else {"ok": False, "status": "n/a"}),
-                "updated_at": datetime.now().strftime("%H:%M"),
+                "refreshed_at": datetime.now().strftime("%H:%M"),
             }
             png = render_image(snapshot)
             Path(QUOTE0_PREVIEW_PATH).write_bytes(png)
